@@ -1,4 +1,5 @@
 """The public command and generated integrations must select the native runtime."""
+from click import unstyle
 from typer.testing import CliRunner
 from cli.native import app
 
@@ -16,4 +17,4 @@ def test_public_command_exposes_native_workflow_without_historical_stack_command
 def test_native_install_help_is_available_without_a_running_service():
     result = CliRunner().invoke(app, ['install', '--help'], color=False)
     assert result.exit_code == 0
-    assert '--model' in result.stdout
+    assert '--model' in unstyle(result.stdout)

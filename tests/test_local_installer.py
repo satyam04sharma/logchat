@@ -4,6 +4,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from click import unstyle
 from typer.testing import CliRunner
 
 from cli.main import app
@@ -213,8 +214,8 @@ def test_configuration_rejection_preserves_existing_file(tmp_path, setup):
 def test_help_exposes_one_generation_model_and_no_stage_overrides(setup):
     result = CliRunner().invoke(app, ["install", "--help"])
     assert result.exit_code == 0
-    assert "--model" in result.output
-    assert "--yes" in result.output
-    assert "--chunk-model" not in result.output
-    assert "--relevance-model" not in result.output
-    assert "--embedding-model" not in result.output
+    assert "--model" in unstyle(result.output)
+    assert "--yes" in unstyle(result.output)
+    assert "--chunk-model" not in unstyle(result.output)
+    assert "--relevance-model" not in unstyle(result.output)
+    assert "--embedding-model" not in unstyle(result.output)

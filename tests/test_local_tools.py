@@ -1,4 +1,5 @@
 """Meaningful native lifecycle/discovery tests; no Docker daemon or real project logs."""
+from click import unstyle
 import json
 import socket
 from pathlib import Path
@@ -111,4 +112,4 @@ def test_generated_mcp_command_cannot_be_shadowed_by_application_cli(tmp_path,mo
     checked=subprocess.run([config['command'],*config['args'],'--help'],cwd=project,capture_output=True,text=True,timeout=20)
     assert checked.returncode==0,checked.stderr
     assert 'SHADOW_APPLICATION_CLI' not in checked.stdout
-    assert '--project' in checked.stdout
+    assert '--project' in unstyle(checked.stdout)
