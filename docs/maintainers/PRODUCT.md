@@ -8,4 +8,4 @@ Setup configures the model, then sources. Human and user-authorized local agent 
 
 The first public scope is one user on loopback, with local model runtime and explicit adapters. Year-scale storage guarantees, long-term consolidation, universal automatic capture, multi-user hosting, arbitrary model providers and automatic migration of old native/Docker history are not included.
 
-See [README](README.md), [architecture](docs/architecture.md), [connectors](docs/connectors.md), and [release gates](docs/release-readiness.md).
+See [README](../../README.md), [architecture](../architecture.md), [connectors](../connectors.md), and [release gates](../release-readiness.md).
