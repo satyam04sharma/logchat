@@ -10,6 +10,14 @@ The `logchat` command runs this native pipeline only. The older Postgres/Docker 
 
 Requirements: Python **3.12+**, [Ollama](https://ollama.com/download) running locally, and enough RAM/disk for your selected models. Model downloads are separate from the Python package. The examples use Mistral 7B for grouping, summaries and relevance, and nomic-embed-text for embeddings.
 
+On macOS, use a Python build with SQLite extension loading, such as Homebrew Python:
+
+```sh
+brew install python@3.12
+```
+
+Some macOS Python distributions omit this capability, which sqlite-vec requires. See [Python's SQLite extension documentation](https://docs.python.org/3.12/library/sqlite3.html#sqlite3.Connection.enable_load_extension).
+
 Start the Ollama app/service first (`ollama serve` in another terminal if needed). From a clone of this repository:
 
 ```sh

@@ -50,3 +50,7 @@ From the exported source, build/install again and follow the README. Provider CL
 - The native service is not a shared/public multi-user deployment. Keep it loopback; provider tokens are privileged source credentials.
 
 The older Docker/pgvector stack remains in the source checkout for regression and migration, and is no longer embedded in the native wheel. It is not evidence that the native runtime uses Postgres, and it is not the first-release quick start.
+
+## First public CI correction
+
+The first GitHub run exposed the hosted macOS Python distribution’s missing SQLite extension capability and a new Next.js security advisory. macOS CI now uses Homebrew Python with an explicit capability preflight; the retained historical web frontend updates Next.js to 16.4.0. The runtime remains SQLite vector RAG.

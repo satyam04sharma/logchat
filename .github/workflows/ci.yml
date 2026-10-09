@@ -5,6 +5,7 @@ permissions:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
         python: ['3.12', '3.13']
@@ -15,8 +16,22 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-python@v7
+        if: runner.os != 'macOS'
         with:
           python-version: ${{ matrix.python }}
+      # Homebrew enables loadable SQLite extensions; the hosted framework
+      # Python on macOS does not provide the sqlite-vec capability we require.
+      - name: Select macOS Python with SQLite extension support
+        if: runner.os == 'macOS'
+        run: |
+          brew install python@${{ matrix.python }}
+          echo "$(brew --prefix python@${{ matrix.python }})/libexec/bin" >> "$GITHUB_PATH"
+      - name: Check SQLite extension loading capability
+        run: python -c "import sqlite3; assert hasattr(sqlite3.Connection, 'enable_load_extension'), 'Python must support SQLite loadable extensions'"
+      - name: Create isolated CI environment
+        run: |
+          python -m venv "$RUNNER_TEMP/logchat-ci"
+          echo "$RUNNER_TEMP/logchat-ci/bin" >> "$GITHUB_PATH"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e '.[dev]'
       - run: python -m pytest -q
