@@ -209,7 +209,7 @@ def collect_railway(project:Path=typer.Option(...,exists=True,file_okay=False),
                     state_dir:Path|None=None, background:bool=False):
     """Collect configured Railway deployment logs without restarting the remote app.
 
-    command-prefix is a JSON argv array, e.g. ["dhunctl","prod","railway"].
+    command-prefix is a JSON argv array, e.g. ["democtl","prod","railway"].
     Never put credentials in the prefix; use the CLI's protected login/profile.
     The default performs one pass; --background keeps collecting every five minutes.
     """

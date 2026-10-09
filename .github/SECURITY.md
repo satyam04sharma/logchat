@@ -4,6 +4,6 @@ Native Logchat is intended for one OS user on loopback. It does not provide mult
 
 The compact path does not blanket-redact log identifiers. Selected fields and summaries can retain sensitive input. Summaries-only is the default; temporary raw capture is explicit, bounded and excluded from retrieval. Models run at the configured loopback Ollama endpoint. Provider tokens are stored separately from memory and status.
 
-Do not post a vulnerability containing tokens, logs or personal data in a public issue. Use the repository’s private security advisory reporting if enabled, or contact the maintainer privately through their published repository contact. No security inbox or response SLA has been established yet.
+Do not post a vulnerability containing tokens, logs or personal data in a public issue. Report vulnerabilities through [GitHub private vulnerability reporting](https://github.com/satyam04sharma/logchat/security/advisories/new). No separate security inbox or response SLA has been established.
 
 Before publication, review Git history and historical reports/screenshots for private data. A clean wheel or source export does not prove the existing repository history is safe. Rotate any credential that was committed; removing it from the current tree is insufficient.

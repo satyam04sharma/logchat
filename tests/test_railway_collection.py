@@ -114,15 +114,15 @@ def test_normalized_blank_messages_do_not_fabricate_lexical_relevance(tmp_path):
     assert sum(row['event_count'] for row in store.evidence(project_id)) == 8
 
 
-def test_cli_parses_dhun_metrics_and_excludes_right_boundary():
+def test_cli_parses_demo_app_metrics_and_excludes_right_boundary():
     start=datetime(2026,10,1,tzinfo=timezone.utc);end=start+timedelta(hours=1)
     output='\n'.join(json.dumps({'timestamp':value.isoformat(),'message':'request timeout',
         'component':'http','http_status':503,'duration_ms':230,'level':'error'}) for value in (start,end))
     with patch('connectors.railway_cli.subprocess.run',return_value=SimpleNamespace(returncode=0,stdout=output.encode())) as command:
-        events=RailwayCLIConnector({'service':'api','command_prefix':['dhunctl','prod','railway']})._read(start,end)
+        events=RailwayCLIConnector({'service':'api','command_prefix':['democtl','prod','railway']})._read(start,end)
     assert len(events)==1 and events[0].request_status==503 and events[0].duration_ms==230
     assert events[0].service=='api'
-    assert command.call_args.args[0][:3]==['dhunctl','prod','railway']
+    assert command.call_args.args[0][:3]==['democtl','prod','railway']
     assert command.call_args.kwargs['capture_output'] and command.call_args.kwargs['timeout']==45
 
 
@@ -148,7 +148,7 @@ def test_cap_is_split_and_no_truncated_page_is_accepted():
 
 
 def test_checkpoint_survives_restart_and_replay_cannot_double_count(tmp_path):
-    store=LocalStore(tmp_path);project=store.create_project('dhun')
+    store=LocalStore(tmp_path);project=store.create_project('demo_app')
     source=store.create_source(project['id'],'api','dev','push',None)
     event=parse_event({'timestamp':'2026-09-01T10:00:00Z','message':'RAW-CANARY request timeout token=private-value','service':'api','level':'error'})
     store.ingest(project['id'],source['id'],[event],checkpoint=(None,'2026-09-01T11:00:00+00:00'))
@@ -163,7 +163,7 @@ def test_checkpoint_survives_restart_and_replay_cannot_double_count(tmp_path):
 
 
 def test_partial_provider_failure_does_not_commit_events_or_cursor(tmp_path):
-    store=LocalStore(tmp_path);project=store.create_project('dhun');source=store.create_source(project['id'],'api','dev','push',None)
+    store=LocalStore(tmp_path);project=store.create_project('demo_app');source=store.create_source(project['id'],'api','dev','push',None)
     async def failing(self,since,until):
         yield parse_event({'timestamp':since.isoformat(),'message':'request timeout'})
         raise ConnectorError('railway_cli_failed')
@@ -176,7 +176,7 @@ def test_partial_provider_failure_does_not_commit_events_or_cursor(tmp_path):
 
 
 def test_variable_payloads_compact_into_one_retained_pattern(tmp_path):
-    store=LocalStore(tmp_path);project=store.create_project('dhun');source=store.create_source(project['id'],'api','dev','push',None)
+    store=LocalStore(tmp_path);project=store.create_project('demo_app');source=store.create_source(project['id'],'api','dev','push',None)
     events=[parse_event({'timestamp':'2026-10-01T10:01:00Z','service':'api','level':'error',
                          'message':f'connection unavailable request payload-{index:x}', 'duration_ms':index,
                          'http_status':503,'request_status':503}) for index in range(50)]
@@ -189,7 +189,7 @@ def test_variable_payloads_compact_into_one_retained_pattern(tmp_path):
 
 
 def test_question_boilerplate_does_not_match_every_memory_block(tmp_path):
-    store=LocalStore(tmp_path);project=store.create_project('dhun');source=store.create_source(project['id'],'api','dev','push',None)
+    store=LocalStore(tmp_path);project=store.create_project('demo_app');source=store.create_source(project['id'],'api','dev','push',None)
     store.ingest(project['id'],source['id'],[parse_event({'timestamp':'2026-10-01T10:01:00Z','service':'api','message':message})
         for message in ['database connection timeout','cache redis unavailable','worker queue retry failed']])
     rows=store.evidence(project['id'],'Which database timeouts were observed?')
@@ -198,7 +198,7 @@ def test_question_boilerplate_does_not_match_every_memory_block(tmp_path):
 
 
 def test_rate_limit_backoff_survives_restart_and_skips_provider(tmp_path):
-    store=LocalStore(tmp_path);project=store.create_project('dhun');source=store.create_source(project['id'],'api','dev','push',None)
+    store=LocalStore(tmp_path);project=store.create_project('demo_app');source=store.create_source(project['id'],'api','dev','push',None)
     config={'project_id':project['id'],'since':'2026-10-01T00:00:00+00:00',
             'sources':[{'id':source['id'],'service':'api','environment':'dev','command_prefix':['railway']}]}
     async def limited(self,since,until):

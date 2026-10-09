@@ -26,3 +26,15 @@ rag-walkthrough-site.tar.gz
 rag-walkthrough-voice.tar.gz
 .pytest_cache/
 *.log
+
+# Private development artifacts are never public source
+.logchat/
+marketing/
+*.mp4
+*.webm
+*.mov
+*.aiff
+*.mp3
+education.html
+reports/
+.frames_tmp/
