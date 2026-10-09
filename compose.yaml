@@ -1,0 +1,291 @@
+# Historical Postgres stack; not the default native release runtime.
+name: logchat-local
+
+x-runtime: &runtime
+  restart: unless-stopped
+  logging:
+    driver: none
+  security_opt:
+    - no-new-privileges=true
+
+x-python: &python
+  build: .
+  image: logchat-python:local
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+
+services:
+  db:
+    <<: *runtime
+    build:
+      context: .
+      dockerfile: infra/db.Dockerfile
+    image: logchat-db:local
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python3 scripts/setup.py first}
+    command: [postgres, -c, log_statement=none, -c, log_min_error_statement=panic, -c, log_parameter_max_length_on_error=0]
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  auth:
+    <<: *runtime
+    image: supabase/gotrue:v2.196.0
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://127.0.0.1:${SUPABASE_PORT:-54321}/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SITE_URL: http://127.0.0.1:${API_PORT:-8080}
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:?Run python3 scripts/setup.py first}
+      GOTRUE_LOG_LEVEL: error
+    healthcheck:
+      test: [CMD, wget, --no-verbose, --tries=1, --spider, http://127.0.0.1:9999/health]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *python
+    restart: "no"
+    logging:
+      driver: none
+    depends_on:
+      auth:
+        condition: service_healthy
+    environment:
+      MIGRATION_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+    command: [python, scripts/migrate.py]
+
+  rest:
+    <<: *runtime
+    image: postgrest/postgrest:v14.17
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_MAX_ROWS: 1000
+      PGRST_LOG_LEVEL: crit
+
+  gateway:
+    <<: *runtime
+    build:
+      context: .
+      dockerfile: infra/gateway.Dockerfile
+    image: logchat-gateway:local
+    depends_on:
+      auth:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    ports:
+      - 127.0.0.1:${SUPABASE_PORT:-54321}:8000
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8000/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ollama:
+    <<: *runtime
+    image: ollama/ollama:0.18.2
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: [CMD, ollama, list]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  models:
+    image: ollama/ollama:0.18.2
+    profiles: [models]
+    restart: "no"
+    logging:
+      driver: none
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: [ollama]
+    command: [pull, nomic-embed-text]
+
+  models-init:
+    image: ollama/ollama:0.18.2
+    restart: "no"
+    logging:
+      driver: none
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      LOGCHAT_CHAT_MODEL: ${LOGCHAT_CHAT_MODEL:-qwen2.5:1.5b}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: [/bin/sh, -c]
+    command: ['ollama pull nomic-embed-text && ollama pull "$${LOGCHAT_CHAT_MODEL}"']
+
+  api:
+    <<: [*runtime, *python]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      gateway:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      models-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      AUTH_URL: http://auth:9999
+      REST_URL: http://rest:3000
+      OLLAMA_URL: http://ollama:11434
+      JWT_SECRET: ${JWT_SECRET}
+      API_PORT: ${API_PORT:-8080}
+      WEB_PORT: ${WEB_PORT:-3000}
+      LOGCHAT_HOST_ROOT: ${LOGCHAT_HOST_ROOT:-}
+      LOGCHAT_CHAT_MODEL: ${LOGCHAT_CHAT_MODEL:-qwen2.5:1.5b}
+      LOGCHAT_RETRIEVAL_CANDIDATES: ${LOGCHAT_RETRIEVAL_CANDIDATES:-10}
+      LOGCHAT_CONTEXT_PER_CELL: ${LOGCHAT_CONTEXT_PER_CELL:-4}
+      LOGCHAT_CONTEXT_BUDGET: ${LOGCHAT_CONTEXT_BUDGET:-8500}
+      LOGCHAT_SECRETS_DIR: /run/logchat/credentials
+    user: "${LOGCHAT_UID:-10001}:${LOGCHAT_GID:-10001}"
+    volumes:
+      - ${LOGCHAT_CREDENTIALS_DIR:-${HOME}/.local/share/logchat/credentials}:/run/logchat/credentials
+    ports:
+      - 127.0.0.1:${API_PORT:-8080}:8080
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=10)"]
+      interval: 10s
+      timeout: 15s
+      retries: 20
+
+  scheduler:
+    <<: [*runtime, *python]
+    user: "${LOGCHAT_UID:-10001}:${LOGCHAT_GID:-10001}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      WORKER_DATABASE_URL: postgres://logchat_worker:${POSTGRES_PASSWORD}@db:5432/postgres
+      LOGCHAT_SECRETS_DIR: /run/logchat/credentials
+      DOCKER_PROXY_URL: http://docker-proxy:2375
+    volumes:
+      - ${LOGCHAT_CREDENTIALS_DIR:-${HOME}/.local/share/logchat/credentials}:/run/logchat/credentials:ro
+    command: [python, -m, pipeline.scheduler]
+
+  builder:
+    <<: [*runtime, *python]
+    user: "${LOGCHAT_UID:-10001}:${LOGCHAT_GID:-10001}"
+    depends_on:
+      models-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+      ollama:
+        condition: service_healthy
+    environment:
+      WORKER_DATABASE_URL: postgres://logchat_worker:${POSTGRES_PASSWORD}@db:5432/postgres
+      OLLAMA_URL: http://ollama:11434
+      LOGCHAT_CHAT_MODEL: ${LOGCHAT_CHAT_MODEL:-qwen2.5:1.5b}
+      LOGCHAT_SECRETS_DIR: /run/logchat/credentials
+      DOCKER_PROXY_URL: http://docker-proxy:2375
+    volumes:
+      - ${LOGCHAT_CREDENTIALS_DIR:-${HOME}/.local/share/logchat/credentials}:/run/logchat/credentials:ro
+    command: [python, -m, pipeline.builder]
+
+  docker-proxy:
+    <<: [*runtime, *python]
+    profiles: [docker]
+    user: root
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: [uvicorn, api.docker_proxy:app, --host, 0.0.0.0, --port, "2375", --no-access-log]
+
+  web:
+    <<: *runtime
+    build: ./web
+    image: logchat-web:local
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_INTERNAL_URL: http://api:8080
+      API_PUBLIC_PORT: ${API_PORT:-8080}
+    ports:
+      - 127.0.0.1:${WEB_PORT:-3000}:3000
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  demo-api:
+    profiles: [demo]
+    image: python:3.12.13-slim
+    container_name: logchat-demo-api
+    command: [python, -u, /demo/app.py]
+    environment:
+      DEMO_ENVIRONMENT: dev
+    volumes:
+      - ./examples/demo/app.py:/demo/app.py:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "4"
+
+  demo-prod:
+    profiles: [demo]
+    image: python:3.12.13-slim
+    container_name: logchat-demo-prod
+    command: [python, -u, /demo/app.py]
+    environment:
+      DEMO_ENVIRONMENT: prod
+    volumes:
+      - ./examples/demo/app.py:/demo/app.py:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "4"
+
+  demo-mcp:
+    <<: *python
+    profiles: [demo]
+    command: [python, examples/demo/mcp_server.py]
+    environment:
+      MCP_HOST: 0.0.0.0
+    volumes:
+      - ./examples:/app/examples:ro
+    logging:
+      driver: none
+
+
+volumes:
+  db-data:
+  ollama-data:

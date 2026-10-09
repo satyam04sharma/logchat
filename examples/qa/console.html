@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthetic browser console app</title><body><h1>Synthetic browser console app</h1>
+<p>This app emits only synthetic records after an explicit click.</p>
+<button id="emit">Emit browser session error</button><output id="status"></output>
+<script>
+document.querySelector('#emit').addEventListener('click', () => {
+  console.error(JSON.stringify({event_id:'BROWSER-'+crypto.randomUUID(),timestamp:new Date().toISOString(),
+    message:'Browser session renewal refused',
+    email:'browser-user@example.test',phone:'+15550001111',library_code:'GlyphIndexMismatch',
+    level:'error',duration_ms:57,request_status:409}));
+  document.querySelector('#status').textContent='Synthetic browser event emitted';
+});
+</script></body></html>

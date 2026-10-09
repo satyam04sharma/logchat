@@ -1,0 +1,1 @@
+"""logchat cli package."""

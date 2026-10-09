@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logchat-demo-web"
+version = "0.1.0"
+description = "Synthetic local web app for the Logchat quick start"
+requires-python = ">=3.12"
+dependencies = ["Flask>=3.1,<4"]
+
+[project.scripts]
+logchat-demo-web = "demo_web:main"
+
+[tool.setuptools]
+py-modules = ["demo_web"]

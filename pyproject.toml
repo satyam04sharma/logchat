@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools==82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logchat"
+version = "0.3.0rc12"
+description = "Local semantic log memory and cited agent context"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = ["fastapi==0.135.1", "uvicorn==0.42.0", "psycopg[binary]==3.3.3", "httpx==0.28.1", "typer==0.24.1", "rich==14.3.3", "PyJWT==2.15.1", "mcp==2.2.0", "psutil==7.2.2", "sqlite-vec==0.1.9"]
+
+[project.scripts]
+logchat = "cli.native:app"
+
+[tool.setuptools.packages.find]
+include = ["api*", "cli*", "pipeline*", "connectors*", "logchat*"]
+
+[tool.setuptools.package-data]
+logchat = ["resources/**/*.md", "resources/**/*.yaml", "local/static/*", "resources/integrations/*.mjs"]
+
+[project.optional-dependencies]
+dev = ["pytest>=9,<10", "pytest-asyncio>=1.3,<2", "build>=1.2,<2"]
+qa = ["playwright>=1.55,<2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

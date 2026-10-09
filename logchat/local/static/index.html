@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f5f7f4">
+  <title>Logchat · Local evidence workspace</title>
+  <link rel="stylesheet" href="/local-assets/style.css?v=0.2.0-r1">
+  <script src="/local-assets/app.js?v=0.2.0-r1" defer></script>
+</head>
+<body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-mark" viewBox="0 0 24 24"><path d="M5 5.5h14v13H5zM8.5 9h7M8.5 12h7M8.5 15h4"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4.5 5.5h15v11h-9l-4.5 3v-3H4.5z"/></symbol>
+    <symbol id="i-source" viewBox="0 0 24 24"><path d="M8 7V4M16 7V4M6 7h12v4a6 6 0 0 1-12 0zM12 17v3"/></symbol>
+    <symbol id="i-compare" viewBox="0 0 24 24"><path d="M5 5v14M19 5v14M9 8h5l-2-2M15 16h-5l2 2"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 4 4"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="1"/><path d="M16 8V5H5v11h3"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 3.5 19h17zM12 9v4M12 16v.1"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 10v6M12 7v.1"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19 8a8 8 0 1 0 1 7M19 4v4h-4"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m9 6-6 6 6 6M15 6l6 6-6 6"/></symbol>
+  </svg>
+
+  <div id="boot" class="boot" role="status">
+    <svg class="brand-mark"><use href="#i-mark"></use></svg>
+    <span>Opening local workspace…</span>
+  </div>
+
+  <div id="app" class="app-shell" hidden>
+    <div id="nav-scrim" class="scrim" hidden></div>
+    <aside id="sidebar" class="sidebar" aria-label="Workspace navigation">
+      <div class="sidebar-head">
+        <a class="brand" href="#investigations" aria-label="Logchat home"><svg><use href="#i-mark"></use></svg><span>logchat</span></a>
+        <button id="close-nav" class="icon-button mobile-only" type="button" aria-label="Close navigation"><svg><use href="#i-close"></use></svg></button>
+      </div>
+
+      <div class="project-control">
+        <div class="project-label-row"><label for="project-picker">Project</label><button id="show-project-form" class="mini-button" type="button"><svg><use href="#i-plus"></use></svg>New</button></div>
+        <div class="select-wrap"><select id="project-picker" aria-describedby="project-path"></select><svg><use href="#i-chevron"></use></svg></div>
+        <p id="project-path" class="project-path">Choose a local project.</p>
+        <form id="project-form" class="inline-form" hidden>
+          <label>Name<input name="name" maxlength="120" placeholder="Checkout service" required></label>
+          <label>Path <span>Optional</span><input name="path" placeholder="/absolute/path"></label>
+          <div><button class="text-button" data-action="cancel-project" type="button">Cancel</button><button class="primary compact" type="submit">Create</button></div>
+        </form>
+      </div>
+
+      <nav id="primary-nav">
+        <button class="nav-item active" data-view="investigations" type="button"><svg><use href="#i-chat"></use></svg>Investigations</button>
+        <button class="nav-item" data-view="agents" type="button"><svg><use href="#i-code"></use></svg>Connect agent</button>
+        <button class="nav-item" data-view="settings" type="button"><svg><use href="#i-settings"></use></svg>Settings</button>
+      </nav>
+
+      <section class="recent-section" aria-labelledby="recent-label">
+        <div class="section-label-row"><span id="recent-label">Recent investigations</span><button id="new-conversation" class="icon-button small" type="button" aria-label="New investigation"><svg><use href="#i-plus"></use></svg></button></div>
+        <div id="conversation-list" class="conversation-list"></div>
+      </section>
+
+      <div class="sidebar-foot">
+        <span class="mode-dot" aria-hidden="true"></span>
+        <div><strong>Local · SQLite</strong><span>Authenticated on this computer</span></div>
+      </div>
+    </aside>
+
+    <header class="topbar">
+      <button id="open-nav" class="icon-button mobile-only" type="button" aria-label="Open navigation"><svg><use href="#i-menu"></use></svg></button>
+      <div class="topbar-scope"><span id="view-name">Investigations</span><span aria-hidden="true">/</span><strong id="project-name">No project</strong></div>
+      <div id="sync-state" class="sync-state"><i></i><span>Checking local state…</span></div>
+    </header>
+
+    <main id="workspace" class="workspace" tabindex="-1"></main>
+
+    <aside id="evidence-panel" class="evidence-panel" aria-label="Supporting memories" tabindex="-1" hidden>
+      <div class="panel-head"><span>Supporting memories</span><button id="close-evidence" class="icon-button" type="button" aria-label="Close evidence"><svg><use href="#i-close"></use></svg></button></div>
+      <div id="evidence-content"></div>
+    </aside>
+  </div>
+
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

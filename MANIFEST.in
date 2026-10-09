@@ -1,0 +1,40 @@
+include compose.yaml Dockerfile .dockerignore
+recursive-include infra *
+recursive-include supabase/migrations *.sql
+include scripts/setup.py scripts/migrate.py
+include start.sh
+recursive-include web *.js *.css *.json *.mjs Dockerfile
+recursive-include examples *.py
+recursive-include logchat/resources *.md *.yaml
+
+recursive-include logchat/local/static *.html *.js *.css
+recursive-include logchat/resources/integrations *.mjs
+
+prune web/node_modules
+prune web/.next
+prune marketing
+prune .gnhf
+prune .logchat
+prune rag-walkthrough-site
+prune build
+prune dist
+global-exclude *.pyc *.pem *.key .env .env.*
+
+include README.md PRODUCT.md CONTRIBUTING.md SECURITY.md CHANGELOG.md LICENSE
+include scripts/check_release_wheel.py scripts/check_release_artifacts.py scripts/prepare_public_source.py
+include docs/architecture.md docs/connectors.md docs/settings.md docs/release-readiness.md
+include .github/workflows/ci.yml
+include scripts/qa_native.py
+include scripts/qa_browser.py
+recursive-include examples/qa *.html
+recursive-include docs/qa *.md
+
+include examples/quickstart/pyproject.toml
+include docs/qa/release-2026-10-07.md
+include docs/screenshots/release-reader-desktop.png docs/screenshots/release-memory-mobile.png
+include docs/rag-rebuild/rag-explained.html
+
+prune examples/quickstart/build
+prune examples/quickstart/logchat_demo_web.egg-info
+
+include Makefile scripts/prepare_hosting_site.py docs/hosting.md docs/cleanup-2026-10-08.md
