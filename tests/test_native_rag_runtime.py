@@ -23,7 +23,7 @@ async def test_prepared_intake_worker_publish_restart_and_replay(tmp_path, monke
     async def create(**kwargs):
         return MockEmbeddings()
     monkeypatch.setattr(OllamaEmbeddingProvider,"create",create)
-    await configure(tmp_path,model="mock-model",dimensions=8)
+    await configure(tmp_path,chat_model="mock-generation", model="mock-model",dimensions=8)
     store=LocalStore(tmp_path)
     project=store.create_project("synthetic runtime")
     source=store.create_source(project["id"],"stdout","dev","push",None)
@@ -61,14 +61,14 @@ async def test_prepared_intake_worker_publish_restart_and_replay(tmp_path, monke
 async def test_index_model_change_rejected_without_replacing_configuration(tmp_path,monkeypatch):
     async def create(**kwargs): return MockEmbeddings()
     monkeypatch.setattr(OllamaEmbeddingProvider,"create",create)
-    await configure(tmp_path,model="mock-model",dimensions=8)
+    await configure(tmp_path,chat_model="mock-generation", model="mock-model",dimensions=8)
     original=(tmp_path/"rag.json").read_bytes()
     class Different(MockEmbeddings):
         spec=EmbeddingSpec("ollama","mock-model","different-digest",8)
     async def different(**kwargs):return Different()
     monkeypatch.setattr(OllamaEmbeddingProvider,"create",different)
     with pytest.raises(ValueError,match="configuration differs"):
-        await configure(tmp_path,model="mock-model",dimensions=8)
+        await configure(tmp_path,chat_model="mock-generation", model="mock-model",dimensions=8)
     assert (tmp_path/"rag.json").read_bytes()==original
 
 
@@ -78,7 +78,7 @@ async def test_authenticated_retry_recovers_exhausted_source_without_deleting_wo
     from logchat.local.app import create_app
     async def create(**kwargs):return MockEmbeddings()
     monkeypatch.setattr(OllamaEmbeddingProvider,"create",create)
-    await configure(tmp_path,model="mock-model",dimensions=8)
+    await configure(tmp_path,chat_model="mock-generation", model="mock-model",dimensions=8)
     application=create_app(tmp_path,8772,capture_host=False)
     store=application.state.store
     project=store.create_project("retry")
@@ -107,7 +107,7 @@ async def test_revision_mismatch_is_unavailable_not_invalid_scope(tmp_path,monke
     from logchat.local.app import create_app
     async def create(**kwargs):return MockEmbeddings()
     monkeypatch.setattr(OllamaEmbeddingProvider,"create",create)
-    await configure(tmp_path,model="mock-model",dimensions=8)
+    await configure(tmp_path,chat_model="mock-generation", model="mock-model",dimensions=8)
     application=create_app(tmp_path,8772,capture_host=False)
     store=application.state.store;project=store.create_project("mismatch")
     environment=store.list_environments(project["id"])[0]
@@ -133,20 +133,16 @@ async def test_enabling_semantic_memory_preserves_legacy_inspector(tmp_path,monk
     identifier=legacy.evidence(project["id"],"")[0]["id"]
     async def create(**kwargs):return MockEmbeddings()
     monkeypatch.setattr(OllamaEmbeddingProvider,"create",create)
-    await configure(tmp_path,model="mock-model",dimensions=8)
+    await configure(tmp_path,chat_model="mock-generation", model="mock-model",dimensions=8)
     application=create_app(tmp_path,8772,capture_host=False)
     client=TestClient(application,base_url="http://127.0.0.1:8772")
     response=client.get(f"/projects/{project['id']}/memories/{identifier}",headers={"Authorization":"Bearer "+legacy.control_token})
     assert response.status_code==200 and response.json()["memory"]["id"]==identifier
 
 
-def test_foreground_fresh_start_configures_semantic_core(tmp_path,monkeypatch):
+def test_foreground_fresh_start_requires_explicit_model_setup(tmp_path, monkeypatch):
     from logchat.local.cli import start_command
-    import uvicorn
-    observed=[]
-    async def create(**kwargs):return MockEmbeddings()
-    monkeypatch.setattr(OllamaEmbeddingProvider,"create",create)
-    monkeypatch.setattr(uvicorn,"run",lambda application,**kwargs:observed.append(application))
-    start_command(8772,tmp_path,True)
-    assert observed[0].state.store.rag_runtime is not None
-    assert (tmp_path/"rag.json").exists()
+    import typer
+    with pytest.raises(typer.Exit):
+        start_command(8772, tmp_path, True)
+    assert not (tmp_path / "rag.json").exists()

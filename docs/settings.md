@@ -25,7 +25,7 @@ CLI options omitted from a capture update preserve their current values. `settin
 ```sh
 logchat settings show --state-dir /path/to/state
 logchat settings models --state-dir /path/to/state
-logchat settings model --state-dir /path/to/state --model mistral:7b
+logchat settings model --state-dir /path/to/state --model YOUR_INSTALLED_GENERATION_MODEL
 logchat settings check --state-dir /path/to/state
 logchat settings capture --state-dir /path/to/state --mode retain_until_summarized --max-mb 100 --retention-hours 24
 logchat settings capture --state-dir /path/to/state --mode summary_only
@@ -52,12 +52,12 @@ Configure your harness to use that output. MCP remains read-only; an authorized 
 
 Service port/state directory are startup options: `logchat start --port 8765 --state-dir PATH`. App capture is an adapter configuration: `logchat local connect --project PATH --logchat-port 8765 --port 8000 --log-file PATH --from-start`, or pass the app command after `--`. A port alone does not reveal logs. Disconnect with `logchat local disconnect --project PATH`. Model-free first setup is `logchat install --capture-only --state-dir PATH --start`.
 
-Internal chunk budgets, scheduler timing, compression prompts and embedding dimensions are not currently user settings. Year-scale rollups and hosted-provider configuration remain unfinished. Model summaries remain unverified prose even when selected fields and exact metrics are validated.
+Internal chunk budgets, scheduler timing and compression prompts are not currently user settings. Initial setup selects the embedding model and dimensions; changing an existing embedding index requires a separate state directory. Year-scale rollups and hosted-provider configuration remain unfinished. Model summaries remain unverified prose even when selected fields and exact metrics are validated.
 
 ## API payloads
 
 ```json
-{"endpoint":"http://127.0.0.1:11434","model":"mistral:7b"}
+{"endpoint":"http://127.0.0.1:11434","model":"YOUR_INSTALLED_GENERATION_MODEL"}
 ```
 
 ```json
@@ -88,3 +88,7 @@ categories. File capture status includes per-source `error_category` and
 `error_phase`, retained until a successful poll. A ready embedding connection does
 not mean every source's last intake succeeded. These diagnostics contain no log
 bodies, provider output or credentials.
+
+## Initial model selection
+
+For a fresh state, provide your chosen `--model`, `--embedding-model` and `--dimensions` to `logchat install`. Existing installations reuse their saved profile. `logchat settings model` accepts embedding model/dimension for fresh capture-only states; an existing vector index cannot silently change those values. Model names shown in historical QA examples identify the tested fixture, not a required or bundled model.

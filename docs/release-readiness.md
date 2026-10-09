@@ -1,4 +1,4 @@
-# 0.3.0rc12 release readiness
+# 0.3.0rc13 release readiness
 
 This is a native local release candidate, not a claim that every original design goal has shipped. Publish the scoped candidate only after the remaining gates below are checked.
 
@@ -32,9 +32,9 @@ python -m pip install -e '.[dev]'
 python -m pytest -q
 LOGCHAT_RUN_ACTUAL_EMBEDDINGS=1 python -m pytest -q tests/test_rag_retriever.py::ActualModelTests
 python -m build
-python scripts/check_release_wheel.py dist/logchat-0.3.0rc12-py3-none-any.whl
+python scripts/check_release_wheel.py dist/logchat-0.3.0rc13-py3-none-any.whl
 python scripts/check_release_artifacts.py
-python scripts/prepare_public_source.py --output /ABSOLUTE/PATH/OUTSIDE/CHECKOUT/logchat-0.3.0rc12-source
+python scripts/prepare_public_source.py --output /ABSOLUTE/PATH/OUTSIDE/CHECKOUT/logchat-0.3.0rc13-source
 ```
 
 Use the exported source for a new public repository. The current private checkout includes historical development reports and local artifacts; making its entire history public is a separate review. The export preserves application code, tests, historical source for regression and migration and current public docs while excluding Git history, local state, historical reports, historical screenshots, model data and generated hosted-site files. Two explicitly allowlisted synthetic reader screenshots are included. Review file contents: an allowlist does not prove absence of private text. Existing history is preserved in the development checkout.
@@ -49,7 +49,7 @@ From the exported source, build/install again and follow the README. Provider CL
 - Hosted generation-provider/API-key setup, model downloads, Sentry integration, legacy history migration, cross-batch consolidation and a demonstrated year of low-footprint memory remain outside this candidate.
 - The native service is not a shared/public multi-user deployment. Keep it loopback; provider tokens are privileged source credentials.
 
-The older Docker/pgvector stack remains in the source checkout for regression and migration, and is no longer embedded in the native wheel. It is not evidence that the native runtime uses Postgres, and it is not the first-release quick start.
+The older Docker/pgvector deployment stack is preserved on `archive/legacy-stack` and is not embedded in the native wheel. It is not evidence that the native runtime uses Postgres, and it is not the first-release quick start.
 
 ## First public CI correction
 

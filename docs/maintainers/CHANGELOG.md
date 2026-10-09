@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0rc13
+
+- Short agent-first README and root skill shared with the installed MCP guide.
+- Organize packages under `src/`; preserve older deployment assets on `archive/legacy-stack`.
+- Require explicit generation and embedding model choices for fresh native setup, with no bundled or downloaded weights.
+- Retain existing model profiles and index compatibility when changing generation models.
+
 ## 0.3.0rc12
 
 - Make the public CLI native-only and route generated agent integrations to it.

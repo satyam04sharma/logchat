@@ -38,24 +38,9 @@ jobs:
       - run: node tests/native_ui_contract.cjs
       - run: python -m build
       - run: python scripts/check_release_artifacts.py
-      - run: python scripts/check_release_wheel.py dist/logchat-0.3.0rc12-py3-none-any.whl
+      - run: python scripts/check_release_wheel.py dist/logchat-0.3.0rc13-py3-none-any.whl
       - run: python -m venv /tmp/logchat-installed-check
-      - run: /tmp/logchat-installed-check/bin/python -m pip install dist/logchat-0.3.0rc12-py3-none-any.whl
+      - run: /tmp/logchat-installed-check/bin/python -m pip install dist/logchat-0.3.0rc13-py3-none-any.whl
       - run: /tmp/logchat-installed-check/bin/logchat --help
       - run: /tmp/logchat-installed-check/bin/logchat install --help
       - run: /tmp/logchat-installed-check/bin/logchat local connect-provider --help
-
-  legacy-web:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - run: node --version
-      - run: npm ci --ignore-scripts
-      - run: npm run build
-      - run: npm audit --audit-level=high

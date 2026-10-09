@@ -82,12 +82,7 @@ def ensure_fresh_rag(directory):
     if load_capture_policy(directory)["mode"] == "retain_until_summarized":
         return
     if not (directory/'rag.json').exists() and not (directory/'local.db').exists():
-        import asyncio
-        from .rag_runtime import configure
-        try:
-            asyncio.run(configure(directory,content_policy="local_model_compact"))
-        except RuntimeError:
-            raise RuntimeError('Semantic model setup is unavailable. Start Ollama and pull nomic-embed-text, then run logchat local configure-rag for this state directory.') from None
+        raise RuntimeError('Choose your installed models with logchat install before starting a new instance. No model is selected or downloaded automatically.')
 
 
 def start(port=DEFAULT_PORT, state_dir=None):

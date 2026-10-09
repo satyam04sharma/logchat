@@ -27,21 +27,22 @@ def check(wheel: Path):
         # against both standalone and embedded-stack copies where applicable.
         checked = 0
         for directory in ("api", "cli", "pipeline", "connectors", "logchat"):
-            for source in sorted((root / directory).rglob("*.py")):
-                if "_stack" in source.relative_to(root).parts:
+            for source in sorted((root / "src" / directory).rglob("*.py")):
+                if "_stack" in source.relative_to(root / "src").parts:
                     continue
-                relative = source.relative_to(root).as_posix()
+                relative = source.relative_to(root / "src").as_posix()
                 for bundled in (relative,):
                     assert archive.read(bundled) == source.read_bytes(), bundled
                     checked += 1
-        assets = [*sorted((root / "logchat/local/static").glob("*")),
-                  root / "logchat/resources/integrations/node.mjs",
-                  root / "logchat/resources/logchat-knowledge/SKILL.md"]
+        assets = [*sorted((root / "src/logchat/local/static").glob("*")),
+                  root / "src/logchat/resources/integrations/node.mjs",
+                  root / "src/logchat/resources/logchat-knowledge/SKILL.md"]
         for source in assets:
-            relative = source.relative_to(root).as_posix()
+            relative = source.relative_to(root / "src").as_posix()
             for bundled in (relative,):
                 assert archive.read(bundled) == source.read_bytes(), bundled
                 checked += 1
+        assert archive.read("logchat/resources/logchat-knowledge/SKILL.md") == (root / "SKILL.md").read_bytes()
         assert not any(name.startswith("logchat/_stack/") for name in archive.namelist())
         entrypoints = archive.read(f"logchat-{release}.dist-info/entry_points.txt").decode()
         assert "logchat = cli.native:app" in entrypoints

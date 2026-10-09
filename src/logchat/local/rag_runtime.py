@@ -30,7 +30,7 @@ MAX_INTAKE_BYTES = 8 * 1024 * 1024
 
 
 async def configure(state_dir: Path, *, base_url="http://127.0.0.1:11434",
-                    model="nomic-embed-text", dimensions=768, chat_model="mistral:7b",
+                    model: str, dimensions: int, chat_model: str,
                     content_policy="redacted_templates") -> dict:
     if content_policy not in {"redacted_templates","local_model_preserved","local_model_compact"}:
         raise ValueError("Unknown log content policy.")

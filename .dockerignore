@@ -1,9 +1,0 @@
-.env
-.env.*
-.logchat
-.git
-**/node_modules
-**/.next
-**/__pycache__
-*.mp4
-site

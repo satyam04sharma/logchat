@@ -730,7 +730,7 @@ def serve(root, *, walkthrough=False, payments=False, custom=False, docker=False
         raise KeyboardInterrupt
     old_handlers = {s: signal.signal(s, interrupted) for s in [signal.SIGINT, signal.SIGTERM]}
     try:
-        require('install', '--yes', '--model', 'mistral:7b', '--state-dir', str(state), '--port', '18940')
+        require('install', '--yes', '--model', 'mistral:7b', '--embedding-model', 'nomic-embed-text', '--dimensions', '768', '--state-dir', str(state), '--port', '18940')
         require('start', '--state-dir', str(state), '--port', '18940')
         owned = True
         with httpx.Client(base_url='http://127.0.0.1:18940', trust_env=False, timeout=180,

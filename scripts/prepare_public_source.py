@@ -9,14 +9,14 @@ import shutil
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
-FILES=['README.md','PRODUCT.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','LICENSE',
-       'Makefile','pyproject.toml','setup.py','MANIFEST.in','.gitignore','.dockerignore','Dockerfile','compose.yaml','start.sh']
-DIRECTORIES=['api','cli','connectors','pipeline','logchat','infra','supabase','web','tests','examples','.github']
-DOCS=['docs/hosting.md','docs/cleanup-2026-10-08.md','docs/architecture.md','docs/connectors.md','docs/settings.md','docs/release-readiness.md',
+FILES=['README.md','SKILL.md','CONTRIBUTING.md','LICENSE','pyproject.toml','.gitignore']
+DIRECTORIES=['src','tests','examples','.github']
+DOCS=['docs/architecture.md','docs/connectors.md','docs/settings.md','docs/release-readiness.md',
+      'docs/hosting.md','docs/cleanup-2026-10-08.md','docs/maintainers/PRODUCT.md','docs/maintainers/CHANGELOG.md',
       'docs/rag-rebuild/rag-explained.html','docs/qa/README.md','docs/qa/requirements.md',
       'docs/qa/release-2026-10-07.md','docs/screenshots/release-reader-desktop.png','docs/screenshots/release-memory-mobile.png']
-SCRIPTS=['scripts/prepare_hosting_site.py','scripts/setup.py','scripts/migrate.py','scripts/check_release_wheel.py','scripts/check_release_artifacts.py','scripts/prepare_public_source.py',
-         'scripts/qa_native.py','scripts/qa_browser.py']
+SCRIPTS=['scripts/prepare_hosting_site.py','scripts/check_release_wheel.py','scripts/check_release_artifacts.py',
+         'scripts/prepare_public_source.py','scripts/qa_native.py','scripts/qa_browser.py']
 EXCLUDE={'.git','.venv','__pycache__','node_modules','.next','.logchat','.gnhf','_stack','.pytest_cache','build','dist'}
 
 

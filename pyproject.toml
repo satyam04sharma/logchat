@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logchat"
-version = "0.3.0rc12"
+version = "0.3.0rc13"
 description = "Local semantic log memory and cited agent context"
 readme = "README.md"
 license = "MIT"
@@ -14,7 +14,11 @@ dependencies = ["fastapi==0.135.1", "uvicorn==0.42.0", "psycopg[binary]==3.3.3",
 [project.scripts]
 logchat = "cli.native:app"
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["api*", "cli*", "pipeline*", "connectors*", "logchat*"]
 
 [tool.setuptools.package-data]
@@ -26,3 +30,4 @@ qa = ["playwright>=1.55,<2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]

@@ -75,6 +75,8 @@ class Input(BaseModel):
 
 
 class SharedModelInput(Input):
+    embedding_model: str | None = Field(default=None, min_length=1, max_length=160)
+    dimensions: int | None = Field(default=None, ge=1, le=4096)
     endpoint: str = Field(default="http://127.0.0.1:11434", min_length=1,max_length=300)
     model: str = Field(min_length=1,max_length=160)
 
@@ -849,7 +851,11 @@ def create_app(state_dir: str | Path, port: int, *, capture_host: bool = True) -
     async def shared_model(body: SharedModelInput):
         from .shared_settings import select_model, SettingsError
         previous=store.rag_runtime
-        try:result=await select_model(store,endpoint=body.endpoint,model=body.model)
+        try:
+            selected = {}
+            if body.embedding_model is not None: selected["embedding_model"] = body.embedding_model
+            if body.dimensions is not None: selected["dimensions"] = body.dimensions
+            result=await select_model(store,endpoint=body.endpoint,model=body.model,**selected)
         except SettingsError as error:raise HTTPException(error.status_code,str(error)) from None
         if previous is None and store.rag_runtime is not None:await store.rag_runtime.start()
         return result

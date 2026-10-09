@@ -152,7 +152,7 @@ def _atomic_write(path: Path, data: bytes):
         Path(temporary).unlink(missing_ok=True)
 
 
-async def select_model(store, endpoint: str | None, model: str) -> dict:
+async def select_model(store, endpoint: str | None, model: str, *, embedding_model: str | None = None, dimensions: int | None = None) -> dict:
     """Validate an explicit generation choice and atomically switch the shared profile.
 
     Existing evidence keeps its recorded model provenance. In-flight queries may
@@ -167,8 +167,13 @@ async def select_model(store, endpoint: str | None, model: str) -> dict:
         original, existing = _existing(directory)
         endpoint = _endpoint(endpoint if endpoint is not None else
                              existing["base_url"] if existing else installer.DEFAULT_ENDPOINT)
-        embedding_model = existing["embedding"]["model"] if existing else installer.DEFAULT_EMBEDDING_MODEL
-        dimensions = existing["embedding"]["dimensions"] if existing else installer.DEFAULT_EMBEDDING_DIMENSIONS
+        if existing:
+            if (embedding_model not in (None, existing["embedding"]["model"]) or dimensions not in (None, existing["embedding"]["dimensions"])):
+                raise SettingsError(422, "Keep the existing embedding index configuration; use a separate state directory to change it.")
+            embedding_model = existing["embedding"]["model"]
+            dimensions = existing["embedding"]["dimensions"]
+        elif (not isinstance(embedding_model, str) or not embedding_model.strip() or type(dimensions) is not int or not 1 <= dimensions <= 4096):
+            raise SettingsError(422, "Choose an embedding model and dimensions for initial setup; no default model is selected.")
         policy = existing.get("content_policy", "redacted_templates") if existing else "local_model_compact"
         try:
             async with asyncio.timeout(90):

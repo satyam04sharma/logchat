@@ -21,7 +21,7 @@ def test_installer_source_is_connected_only_after_selected_model_is_ready(tmp_pa
     monkeypatch.setattr(installer,'start',start)
     monkeypatch.setattr(onboarding,'onboard_source',connect)
     config=tmp_path/'source.json';config.write_text('{"container":"synthetic"}')
-    result=CliRunner().invoke(root_app,['install','--yes','--state-dir',str(tmp_path/'state'),'--source','docker','--source-config',str(config),'--project',str(tmp_path),'--port','18865'])
+    result=CliRunner().invoke(root_app,['install', "--model", "chosen:7b", "--embedding-model", "nomic-embed-text", "--dimensions", "768", '--yes','--state-dir',str(tmp_path/'state'),'--source','docker','--source-config',str(config),'--project',str(tmp_path),'--port','18865'])
     assert result.exit_code==0,result.output
     selected.assert_awaited_once();start.assert_called_once()
     connect.assert_called_once_with(tmp_path/'state',18865,source='docker',project=tmp_path,config_path=config,interactive=False)
@@ -30,7 +30,7 @@ def test_installer_source_is_connected_only_after_selected_model_is_ready(tmp_pa
 def test_invalid_source_and_no_start_are_rejected_before_model_setup(tmp_path,monkeypatch):
     selected=AsyncMock();monkeypatch.setattr(installer,'prepare_installation',selected)
     for flags in (['--source','unknown'],['--source','docker','--no-start']):
-        result=CliRunner().invoke(root_app,['install','--yes','--state-dir',str(tmp_path),*flags])
+        result=CliRunner().invoke(root_app,['install', "--model", "chosen:7b", "--embedding-model", "nomic-embed-text", "--dimensions", "768", '--yes','--state-dir',str(tmp_path),*flags])
         assert result.exit_code==1
     selected.assert_not_awaited()
 
@@ -121,7 +121,7 @@ def test_failed_source_setup_does_not_dump_traceback_or_provider_content(tmp_pat
     monkeypatch.setattr(installer,'prepare_installation',selected)
     monkeypatch.setattr(installer,'start',Mock(return_value='http://127.0.0.1:18865'))
     monkeypatch.setattr(onboarding,'onboard_source',Mock(side_effect=RuntimeError('PRIVATE_PROVIDER_CANARY')))
-    result=CliRunner().invoke(root_app,['install','--yes','--start','--state-dir',str(tmp_path),'--source','docker'])
+    result=CliRunner().invoke(root_app,['install', "--model", "chosen:7b", "--embedding-model", "nomic-embed-text", "--dimensions", "768", '--yes','--start','--state-dir',str(tmp_path),'--source','docker'])
     assert result.exit_code==1
     assert 'PRIVATE_PROVIDER_CANARY' not in result.output
     assert 'source connection did not finish' in result.output

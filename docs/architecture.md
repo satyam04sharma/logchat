@@ -26,3 +26,9 @@ Readable memory contains model-written compact text, selected original values, s
 Output is retrieved context, not generated solutions. The read-only project-bound MCP lets the requesting agent inspect supporting memories. Source and settings changes are local authenticated control operations. Provider credentials live separately from event memory, and token values are never in source status.
 
 Long-term consolidation, year-scale retention quality, hosted model setup, external legacy-history migration and broad live-provider acceptance remain separate work. The older Docker/pgvector stack is retained but does not back this native pipeline.
+
+## Repository boundaries
+
+`src/logchat/rag` is the active semantic core, `src/logchat/local` owns service/setup/capture, and `src/cli/native.py` is the public CLI. Shared transports and contracts live under `src/connectors` and `src/pipeline`. Compatibility API/CLI modules remain for shared client contracts and regression coverage. Earlier deployment assets are preserved on the `archive/legacy-stack` branch.
+
+A fresh installation must select a generation model, embedding model and dimension. No named model is bundled, downloaded or selected by default. Existing index identity is retained when changing generation models.

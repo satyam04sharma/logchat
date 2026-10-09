@@ -52,7 +52,7 @@ const sandbox = { document, location: { hash: '' }, window: { matchMedia: query 
   }
   return mediaQueries.get(query);
 }, addEventListener() {} }, navigator: { clipboard: { writeText: async text => { clipboard = text; } } }, crypto: {}, Intl, Date, setTimeout: () => {}, clearInterval() {}, setInterval() {} };
-const source = fs.readFileSync('logchat/local/static/app.js', 'utf8').replace('  init();\n})();', '  globalThis.testUI = { state, viewLabels, messageNode, renderInvestigations, openMemories, closeEvidence, bindChrome, shellQuote, integrationSettings, commandPanel };\n})();');
+const source = fs.readFileSync('src/logchat/local/static/app.js', 'utf8').replace('  init();\n})();', '  globalThis.testUI = { state, viewLabels, messageNode, renderInvestigations, openMemories, closeEvidence, bindChrome, shellQuote, integrationSettings, commandPanel };\n})();');
 vm.runInNewContext(source, sandbox);
 const ui = sandbox.testUI;
 function find(node, tag, text) { return node.querySelectorAll(tag).find(n => n.textContent === text); }
@@ -130,7 +130,7 @@ function find(node, tag, text) { return node.querySelectorAll(tag).find(n => n.t
   assert.equal(document.activeElement, ids['#close-evidence']);
   ui.closeEvidence();
   // Use the actual shipped CSS breakpoint, so JS/CSS drift fails this contract.
-  const css = fs.readFileSync('logchat/local/static/style.css', 'utf8');
+  const css = fs.readFileSync('src/logchat/local/static/style.css', 'utf8');
   const overlayWidth = Number(css.match(/@media \(max-width: (\d+)px\)\s*\{[^}]*\}[^@]*?\.evidence-panel\s*\{\s*position: fixed;/)[1]);
   assert.equal(overlayWidth, 900);
   ui.bindChrome();

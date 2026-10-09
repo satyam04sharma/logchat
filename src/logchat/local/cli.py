@@ -143,7 +143,7 @@ def start_command(port:int=DEFAULT_PORT,state_dir:Path|None=None,foreground:bool
 
 @app.command('configure-rag')
 def configure_rag(state_dir:Path|None=None,base_url:str='http://127.0.0.1:11434',
-                  embedding_model:str='nomic-embed-text',dimensions:int=768,chat_model:str='mistral:7b',
+                  embedding_model: str = typer.Option(...), dimensions: int = typer.Option(..., min=1, max=4096), chat_model: str = typer.Option(...),
                   content_policy:str='local_model_compact'):
     """Enable the shared semantic core after verifying an installed embedding model."""
     import asyncio
@@ -554,6 +554,8 @@ def settings_models(state_dir: Path | None = typer.Option(None,"--state-dir")):
 
 @settings_app.command("model")
 def settings_model(model: str = typer.Option(...,"--model"),
+                   embedding_model: str | None = typer.Option(None,"--embedding-model"),
+                   dimensions: int | None = typer.Option(None,"--dimensions", min=1, max=4096),
                    endpoint: str | None = typer.Option(None,"--endpoint"),
                    state_dir: Path | None = typer.Option(None,"--state-dir")):
     """Select one shared generation model after internal checks; keep the embedding index."""
@@ -561,6 +563,8 @@ def settings_model(model: str = typer.Option(...,"--model"),
         directory=state_directory(state_dir)
         current=api(directory,"GET","/settings/models")
         body={"model":model,"endpoint":endpoint or current.get("base_url") or "http://127.0.0.1:11434"}
+        if embedding_model is not None: body["embedding_model"] = embedding_model
+        if dimensions is not None: body["dimensions"] = dimensions
         typer.echo(json.dumps(api(directory,"PUT","/settings/shared-model",body,timeout=180),indent=2))
     except (RuntimeError,OSError,ValueError) as error:fail(error)
 

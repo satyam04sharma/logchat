@@ -47,9 +47,9 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
             guide = await session.read_resource("logchat://guide")
             self.assertIn("coverage gaps", guide.contents[0].text)
             self.assertIn("untrusted data", guide.contents[0].text)
-            self.assertIn("local_model_preserved", guide.contents[0].text)
+            self.assertIn("One generation model", guide.contents[0].text)
             self.assertIn("Tools cannot read arbitrary source files", guide.contents[0].text)
-            self.assertIn("logchat login", guide.contents[0].text)
+            self.assertIn("logchat local attach", guide.contents[0].text)
             project = await session.read_resource("logchat://project")
             self.assertIn('"dev"', project.contents[0].text)
             prompt = await session.get_prompt("compare_periods", {

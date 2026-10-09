@@ -26,7 +26,7 @@ class Embeddings:
 async def configured(tmp_path,monkeypatch):
     async def create(**kwargs):return Embeddings()
     monkeypatch.setattr(OllamaEmbeddingProvider,'create',create)
-    await configure(tmp_path/'state',model='mock',dimensions=8)
+    await configure(tmp_path/'state',chat_model="mock-generation", model='mock',dimensions=8)
     store=LocalStore(tmp_path/'state');project=store.create_project('files')
     source=store.create_source(project['id'],'app file','dev','push',8000)
     return store,project,source

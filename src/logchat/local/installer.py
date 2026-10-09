@@ -18,9 +18,9 @@ from logchat.local.rag_runtime import configure
 from pipeline.models import LocalModels
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:11434"
-DEFAULT_GENERATION_MODEL = "mistral:7b"
-DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"
-DEFAULT_EMBEDDING_DIMENSIONS = 768
+DEFAULT_GENERATION_MODEL = None
+DEFAULT_EMBEDDING_MODEL = None
+DEFAULT_EMBEDDING_DIMENSIONS = None
 READINESS_MARKER = "logchat-local-readiness-v1"
 READINESS_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["marker", "ready"],
@@ -115,10 +115,13 @@ async def verify_generation(endpoint: str, model: str, *, embedding_model: str) 
 
 
 async def prepare_installation(directory: Path, *, endpoint: str, model: str,
-                               embedding_model=DEFAULT_EMBEDDING_MODEL,
-                               dimensions=DEFAULT_EMBEDDING_DIMENSIONS) -> dict:
+                               embedding_model: str,
+                               dimensions: int) -> dict:
     """Write configuration only after readiness; caller holds lifecycle lock."""
     endpoint, model = validate_endpoint(endpoint), validate_model(model)
+    embedding_model = validate_model(embedding_model)
+    if type(dimensions) is not int or not 1 <= dimensions <= 4096:
+        raise InstallError("Choose the embedding dimensions for the selected model (1–4096).")
     process, _ = managed_process(directory)
     if process is not None:
         raise InstallError("Stop the instance for this state directory before configuring it. Existing memory is retained.")
@@ -142,10 +145,12 @@ def install_command(
     state_dir: Path | None = typer.Option(None, "--state-dir", help="Independent local state directory."),
     endpoint: str | None = typer.Option(None, "--endpoint", help="Loopback Ollama endpoint."),
     model: str | None = typer.Option(None, "--model", help="One installed generation model shared by all generation roles."),
+    embedding_model: str | None = typer.Option(None, "--embedding-model", help="Selected installed embedding model; reuse an existing index profile."),
+    dimensions: int | None = typer.Option(None, "--dimensions", min=1, max=4096, help="Dimensions of the selected embedding model."),
     capture_only: bool = typer.Option(False, "--capture-only", help="Explicitly retain bounded temporary logs without model setup."),
     raw_limit_mb: int = typer.Option(100, "--raw-limit-mb", min=1, max=1024),
     raw_retention_hours: int = typer.Option(24, "--raw-retention-hours", min=1, max=720),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Use supplied values or existing/default choices without prompts."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Use supplied values or existing model choices without prompts."),
     start_service: bool | None = typer.Option(None, "--start/--no-start", help="Optionally start after all readiness checks pass; defaults to not starting."),
     port: int = typer.Option(DEFAULT_PORT, "--port", min=1, max=65535, help="Independent Logchat service port."),
     source: str | None = typer.Option(None, "--source", help="Connect file, command, docker, railway, vercel, cli, or later after model setup."),
@@ -184,11 +189,17 @@ def install_command(
             typer.prompt("Local Ollama endpoint", default=defaults["endpoint"]))
         chosen_model = model if model is not None else (defaults["model"] if yes else
             typer.prompt("Shared generation model", default=defaults["model"]))
+        if chosen_model is None:
+            raise InstallError("Choose an installed generation model with --model; no model is selected by default.")
+        chosen_embedding = embedding_model if embedding_model is not None else (defaults["embedding_model"] if yes else typer.prompt("Embedding model", default=defaults["embedding_model"]))
+        chosen_dimensions = dimensions if dimensions is not None else (defaults["dimensions"] if yes else typer.prompt("Embedding dimensions", default=defaults["dimensions"], type=int))
+        if chosen_embedding is None or chosen_dimensions is None:
+            raise InstallError("For a new installation, choose --embedding-model and --dimensions; no embedding model is selected by default.")
         chosen_endpoint, chosen_model = validate_endpoint(chosen_endpoint), validate_model(chosen_model)
         typer.echo("Checking the selected model connection and local storage…")
         with locked(directory):
             report = asyncio.run(prepare_installation(directory, endpoint=chosen_endpoint, model=chosen_model,
-                embedding_model=defaults["embedding_model"], dimensions=defaults["dimensions"]))
+                embedding_model=chosen_embedding, dimensions=chosen_dimensions))
         should_start = start_service
         if should_start is None:
             should_start = False if yes else typer.confirm("Start this Logchat instance now?", default=False)

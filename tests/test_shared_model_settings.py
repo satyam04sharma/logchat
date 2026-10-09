@@ -124,7 +124,7 @@ async def test_success_switches_all_roles_keeps_embedding_and_historical_provena
     backend, scheduler, spec, old_profile = runtime.backend, runtime.scheduler, runtime.spec, runtime.model_profile
     with backend.connect() as connection:
         old_payload = connection.execute("SELECT payload FROM rag_schedule_jobs WHERE job_id=?", (first["jobs"][0],)).fetchone()[0]
-    result = await shared_settings.select_model(store, None, "new:7b")
+    result = await shared_settings.select_model(store, None, "new:7b", embedding_model="nomic-embed-text", dimensions=8)
     assert result["shared_model"] == "new:7b" and result["embedding_unchanged"]
     assert runtime.backend is backend and runtime.scheduler is scheduler and runtime.spec == spec
     assert runtime.model_profile is not old_profile and store.rag_runtime is runtime
@@ -148,7 +148,7 @@ async def test_busy_intake_cannot_change_model_mid_batch(configured, models):
     try:
         await models["intake_started"].wait()
         with pytest.raises(shared_settings.SettingsError) as error:
-            await shared_settings.select_model(store, None, "new:7b")
+            await shared_settings.select_model(store, None, "new:7b", embedding_model="nomic-embed-text", dimensions=8)
         assert error.value.status_code == 409
         assert store.rag_runtime.model_profile.generation_model == "old:7b"
         assert models["requests"] == []
@@ -162,7 +162,7 @@ async def test_selection_holds_preparation_slot_but_allows_raw_capture(configure
     store, project, source = configured
     save_capture_policy(store.state_dir, mode="retain_until_summarized")
     models["probe_started"], models["probe_release"] = asyncio.Event(), asyncio.Event()
-    task = asyncio.create_task(shared_settings.select_model(store, None, "new:7b"))
+    task = asyncio.create_task(shared_settings.select_model(store, None, "new:7b", embedding_model="nomic-embed-text", dimensions=8))
     try:
         await models["probe_started"].wait()
         result = await store.rag_runtime.ingest_async(project["id"], source["id"], [event(source, "captured-during-check")])
@@ -223,7 +223,7 @@ async def test_raw_only_bootstrap_keeps_pending_then_uses_explicit_selected_mode
     project = store.create_project("capture")
     source = store.create_source(project["id"], "logs", "dev", "push", None)
     await runtime.ingest_async(project["id"], source["id"], [event(source, "pending")])
-    result = await shared_settings.select_model(store, installer.DEFAULT_ENDPOINT, "new:7b")
+    result = await shared_settings.select_model(store, installer.DEFAULT_ENDPOINT, "new:7b", embedding_model="nomic-embed-text", dimensions=8)
     assert result["runtime_created"] is False and result["embedding_unchanged"] is False
     assert runtime is store.rag_runtime and runtime.model_profile.generation_model == "new:7b"
     assert runtime.raw_capture.status()["pending_events"] == 1
@@ -234,7 +234,7 @@ async def test_raw_only_bootstrap_keeps_pending_then_uses_explicit_selected_mode
 @pytest.mark.asyncio
 async def test_fresh_bootstrap_creates_runtime_without_starting_background_work(tmp_path, models):
     store = LocalStore(tmp_path)
-    result = await shared_settings.select_model(store, None, "new:7b")
+    result = await shared_settings.select_model(store, None, "new:7b", embedding_model="nomic-embed-text", dimensions=8)
     assert result["runtime_created"] is True
     assert store.rag_runtime.model_profile.generation_model == "new:7b"
     assert store.rag_runtime.task is None
@@ -263,7 +263,7 @@ async def test_atomic_write_failure_leaves_profile_and_file_unchanged(configured
         write(path, data)
     monkeypatch.setattr(shared_settings, "_atomic_write", rejected)
     with pytest.raises(shared_settings.SettingsError) as error:
-        await shared_settings.select_model(store, None, "new:7b")
+        await shared_settings.select_model(store, None, "new:7b", embedding_model="nomic-embed-text", dimensions=8)
     assert error.value.status_code == 503 and PRIVATE not in str(error.value)
     assert (store.state_dir / "rag.json").read_bytes() == original
     assert store.rag_runtime.model_profile is profile
@@ -275,7 +275,7 @@ async def test_cancelled_probe_keeps_profile_and_releases_slot(configured, model
     profile = store.rag_runtime.model_profile
     original = (store.state_dir / "rag.json").read_bytes()
     models["probe_started"], models["probe_release"] = asyncio.Event(), asyncio.Event()
-    task = asyncio.create_task(shared_settings.select_model(store, None, "new:7b"))
+    task = asyncio.create_task(shared_settings.select_model(store, None, "new:7b", embedding_model="nomic-embed-text", dimensions=8))
     await models["probe_started"].wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
