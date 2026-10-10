@@ -1,8 +1,16 @@
-Avatar exported using Bible Strong Avatar Lab Photo Mode (Grok bot preset).
-Source: https://github.com/smontlouis/bible-strong-avatar-lab
-Studio: https://avatars.bible-strong.app/
-The upstream project uses AGPL-3.0-only; its license is retained beside the export.
-No avatar runtime, studio code, npm package or external iframe is embedded.
-The exported SVG is included unchanged. This notice does not relicense Logchat's MIT application code.
+# Landing-page credits and source
 
-The landing page adds original CSS greeting/blink animation to an inline copy of the export. The downloadable SVG remains unchanged.
+This standalone landing page uses Bible Strong Avatar Lab's Grok bot and animation library by Stéphane Montlouis-Calixte.
+
+- Studio: https://avatars.bible-strong.app/
+- Upstream source: https://github.com/smontlouis/bible-strong-avatar-lab
+- Runtime: @bible-strong/avatar-web 0.1.0 and @bible-strong/avatar-core 0.1.0 (AGPL-3.0-only).
+- License: [GNU AGPL v3](LICENSE).
+- Complete landing-page source: https://github.com/satyam04sharma/logchat/tree/gh-pages/avatar-preview
+- Runtime source is also included in landing.js.map, alongside the editable landing-entry.js and logchat.avatar.json.
+
+Changes: selected Grok bot; bounded wake/curious/happy/celebrate/confused/listening reactions with a neutral ending; added page arrival and clipboard interactions, pause, visibility, and reduced-motion handling. The downloadable original SVG remains unchanged.
+
+This landing-page directory is distributed under AGPL-3.0-only. It is separate from Logchat's MIT-licensed application on the main branch.
+
+To rebuild: npm ci then npm run build in this directory. Node.js 22.12 or newer is required by the upstream runtime.

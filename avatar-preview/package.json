@@ -1,0 +1,11 @@
+{
+  "name": "logchat-landing-page",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "build": "esbuild assets/avatar-lab/landing-entry.js --bundle --format=esm --sourcemap --outfile=assets/avatar-lab/landing.js"
+  },
+  "dependencies": {"@bible-strong/avatar-web": "0.1.0"},
+  "devDependencies": {"esbuild": "0.25.12"}
+}
