@@ -209,7 +209,7 @@ footer .wrap{display:flex;gap:16px;flex-wrap:wrap;align-items:center;justify-con
       <button class="replay" id="replay" type="button">↻ Replay</button>
       <div class="body">
         <div class="q" id="dq">Why did signups fail last night?</div>
-        <div class="a" id="da"><img class="av" src="assets/avatar-lab/logchat-bot.svg" width="38" height="38" alt="" aria-hidden="true"><p id="daText">Signups failed from 02:04 to 03:10, right after deploy a41c. The new auth call times out after 10 s, so 412 signup requests returned 504.</p></div>
+        <div class="a" id="da"><img class="av" src="assets/avatar-lab/logchat-bot.svg" width="38" height="38" alt="" aria-hidden="true"><p id="daText">Supporting context: 412 signup requests returned 504 between 02:04 and 03:10. Records include 10 s auth timeouts and deploy a41c; causation is not established.</p></div>
         <div class="comp" id="dt">
           <div class="t">Timeline · last night</div>
           <svg viewBox="0 0 500 96" role="img" aria-label="Error spike between 02:04 and 03:10, after deploy a41c at 02:03">
