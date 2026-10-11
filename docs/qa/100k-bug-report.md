@@ -14,6 +14,7 @@ Current release status: **not ready to publish as a validated 100K demo**. Histo
 | Auth embedding token overflow hidden by generic failure | Corrected; fresh pilot cycle 2 indexes all 400 auth events and all 1,200 total events |
 | Repeated incident candidates crowd out a requested service | Corrected candidate; independent crowding, joint-match and comparison-alternative probes pass |
 | Incomplete vector/citation acceptance checks | QA corrected; corruption probes reject incomplete evidence |
+| Fresh breadth checker compares incompatible window shapes | Confirmed QA bug: API adds the existing half-open `bounds` marker to canonical start/end. Strict timestamps and marker checks must replace whole-dictionary equality before repeating the proof |
 | Digest ledger only counted, not fully reconciled | QA corrected; all canonical values/scopes/job bindings checked and seven corruption probes rejected |
 | Actual multi-service model selection fails validation | Duplicate references and contradictory decisions corrected structurally; full-input proofs now expose a separate order-sensitive auth relevance omission |
 | Summary metric attribution and unsupported source adjacency | Confirmed prose-fidelity bugs; per-record input correction reviewed, actual corrected prose proof still outstanding |
@@ -276,3 +277,11 @@ The reviewed runtime passes three sequential actual proofs on byte-identical dis
 | Semantic paraphrase, web | 1 | 4,179 | 11.813 | Relevant web observation selected; all gates pass |
 
 Every complete prompt plus the unchanged 1,200-token output reserve fits the 8,192-token context. Provider counters match exact native tokenization and all calls terminate with `stop`. Strict labels/confidence, immutable caller bindings, original citations, scope, aggregate budgets, hard caps and the shared deadline pass. Only model-positive evidence is selected. These finite fixture results establish the measured relevance correction; they do not establish fresh compaction prose, global recall, production throughput or 100K completion. Relevance-proof generations now total 19, including all preserved earlier failed/diagnostic calls. The separate fresh twelve-memory HTTP breadth proof is underway.
+
+## Fresh breadth cycle: canonical window checker mismatch
+
+The fresh HTTP fixture indexed all twelve one-event memories, twelve completed jobs and twelve bound 768-dimensional vectors with exact IDs, canonical keys/digests, source scopes, status 504 and duration 5,000 ms. Its first exact query classified five complete candidates under the aggregate budget and selected three distinct services. Precision and source coverage were 1.0; bounded selection recall was 3/12. All five provider input counts matched native tokenization, stop termination and strict decisions; classification took 13.719 seconds.
+
+The overall proof still failed because its compound canonical check compared the API window dictionary directly with the stored window dictionary. Canonical start/end match exactly; the API also includes the established `bounds: "[start,end)"` marker. Summary, chunk IDs, service and project/environment/source scopes all match. This is a checker shape bug, not a changed source window. The correction must require exact canonical timestamps, the half-open marker and the expected API shape, with shifted/missing/extra/wrong-bound controls; it must not remove temporal checks.
+
+The failed whole run remains preserved, and the owned server stopped. All 64 independently snapshotted original state and historical evidence files remain unchanged. It consumed 24 native intake generations and five relevance generations, accounted separately; the relevance-proof total is now 24. Cross-service/restart/replay for this fresh fixture did not run after the failure. A fresh full breadth cycle is required after reviewed QA correction; fresh prose/pilot/100K and publication gates remain outstanding.
