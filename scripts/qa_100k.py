@@ -231,7 +231,7 @@ def main():
                             concurrent_query=dict(passed=False,error_category=type(error).__name__,pending_at_start=capture_status['pending_events'],indexed_at_start=snapshot['indexed_events'])
                         save(root/'concurrent-query-check.json',concurrent_query)
                     if snapshot['indexed_events']==a.count and not capture_status['pending_events'] and not any(k!='completed' for k in snapshot['jobs']):break
-                    if capture_status['pending_failed_events']:break
+                    if capture_status['pending_failed_events'] or snapshot['jobs'].get('failed',0):break
                 elif not any(k!='completed' for k in snapshot['jobs']):break
                 time.sleep(2)
             index_elapsed_seconds=round(time.monotonic()-admission_started,3) if snapshot['indexed_events']==a.count and snapshot['native_index_complete'] else None
