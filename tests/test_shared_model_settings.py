@@ -61,6 +61,8 @@ class Generation(SyntheticPhysicalPreflight):
 
 @pytest.fixture
 def models(monkeypatch):
+    from tests.synthetic_embedding_admission import install
+    install(monkeypatch)
     state = {"calls": [], "requests": [], "embedding_calls": [], "revision": "stable-embedding-revision",
              "metadata": {"old:7b": {"capabilities": ["completion"]},
                           "new:7b": {"capabilities": ["completion", "tools"]},

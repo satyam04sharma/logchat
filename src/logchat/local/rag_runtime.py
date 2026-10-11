@@ -411,6 +411,9 @@ class NativeRAGRuntime:
                         model_events=model_events, deadline=intake_timeout.when())
                     diagnostics.advance("validate_enqueue")
                     validate_compact_batch(compact)
+                    plan = await self.model_profile.plan_embedding_batch(
+                        compact, deadline=intake_timeout.when())
+                    compact = plan.batch
                     jobs.append(self.scheduler.enqueue(compact,
                         event_digests={key: digests[key] for key in compact.event_keys}))
             diagnostics.status = "ok"

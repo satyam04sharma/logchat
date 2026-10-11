@@ -63,6 +63,8 @@ class Generation(SyntheticPhysicalPreflight):
 
 @pytest_asyncio.fixture
 async def configured(tmp_path, monkeypatch):
+    from tests.synthetic_embedding_admission import install
+    install(monkeypatch)
     async def create(**kwargs):
         return Embeddings()
     model = Generation()

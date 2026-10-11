@@ -62,7 +62,8 @@ class OllamaEmbeddingProvider:
         value.spec = EmbeddingSpec("ollama", model, digest + ":" + PREFIX_VERSION, dimensions)
         return value
 
-    async def embed(self, texts, *, purpose="document"):
+    def request_body(self, texts, *, purpose="document"):
+        """Pure final-input recipe shared by physical admission and transport."""
         if purpose not in {"document", "query"} or not 1 <= len(texts) <= MAX_TEXTS:
             raise ValueError("embedding_batch_bound_exceeded")
         maximum = MAX_SUMMARY_CHARS if self.preserve_content else 4000
@@ -70,13 +71,25 @@ class OllamaEmbeddingProvider:
             raise ValueError("embedding_text_bound_exceeded")
         prefix = ("search_document: " if purpose == "document" else "search_query: ") if self.spec.model.split(":")[0] == "nomic-embed-text" else ""
         payload = [prefix + (text if self.preserve_content else redact_text(text)) for text in texts]
+        return {"model": self.spec.model, "input": payload, "truncate": False}
+
+    async def embed(self, texts, *, purpose="document"):
+        body = self.request_body(texts, purpose=purpose)
+        # Freeze all request-defining configuration across awaited revision
+        # checks. _request constructs the URL/body before yielding to transport.
+        binding = (self.base_url, self.transport, self.spec, self.preserve_content)
+        def check():
+            if ((self.base_url, self.transport, self.spec, self.preserve_content) != binding
+                    or self.transport is not binding[1]):
+                raise ValueError("embedding_provider_changed")
         try:
             async with httpx.AsyncClient(trust_env=False, follow_redirects=False, transport=self.transport, timeout=120) as client:
                 await self._verify_revision(client)
-                data = await self._request(client, "POST", "/api/embed", payload={
-                    "model": self.spec.model, "input": payload, "truncate": False,
-                })
+                check()
+                data = await self._request(client, "POST", "/api/embed", payload=body)
+                check()
                 await self._verify_revision(client)
+                check()
             vectors = data["embeddings"]
             if len(vectors) != len(texts):
                 raise ValueError()

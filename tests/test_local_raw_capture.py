@@ -212,6 +212,8 @@ def raw_runtime(tmp_path):
 
 
 async def configure_mock(store, monkeypatch):
+    from tests.synthetic_embedding_admission import install
+    install(monkeypatch)
     model = Generation()
     async def create(**kwargs):
         return Embeddings()

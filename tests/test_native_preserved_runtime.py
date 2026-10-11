@@ -15,6 +15,8 @@ from pipeline.types import LogEvent
 
 @pytest.mark.asyncio
 async def test_preserved_intake_refinement_embedding_query_inspection_and_chat(tmp_path,monkeypatch):
+    from tests.synthetic_embedding_admission import install
+    install(monkeypatch)
     texts=[]
     classifier_inputs=[]
     class Provider:
