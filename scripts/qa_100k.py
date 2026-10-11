@@ -91,8 +91,8 @@ def reconcile(state, configs):
     db.close()
     return dict(passed=all(result['passed'] for result in results),sources=results)
 
-def context_quality(state, configs, label, answer, service=None):
-    """Score seeded incident support against durable IDs, not model confidence."""
+def context_quality(state, configs, label, answer, service=None, expected_ids_override=None):
+    """Score generated support against durable IDs, not model confidence."""
     evidence=answer.get('evidence',[])
     if label in {'negative','empty environment','empty control project'}:
         return dict(passed=not evidence,false_positive_memories=len(evidence),expected_empty=True)
@@ -100,6 +100,7 @@ def context_quality(state, configs, label, answer, service=None):
     for config in configs:
         if service and config['app']!=service:continue
         expected_ids.update(f"{config['run_id']}-{config['app']}-{index:06d}" for index in [0,10000,20000,30000] if index<config['count'])
+    if expected_ids_override is not None:expected_ids=set(expected_ids_override)
     with sqlite3.connect(f'file:{state}/rag.db?mode=ro',uri=True) as db:
         chunks=[json.loads(row[0]) for row in db.execute('SELECT payload FROM rag_chunks')]
     relevant={chunk['chunk_id'] for chunk in chunks if any(record['event_id'] in expected_ids for record in json.loads(chunk['compact_evidence'])['records'])}
@@ -114,7 +115,7 @@ def context_quality(state, configs, label, answer, service=None):
         selected_memory_precision=precision,selected_memory_recall=recall,
         reciprocal_rank=next((1/(index+1) for index,hit in enumerate(hits) if hit),0.0),
         relevant_memories=len(relevant),selected_memories=len(selected),source_coverage=source_coverage,
-        interpretation='Seeded incident support only; bounded selection recall is reported, not a global RAGAS or entailment score')
+        interpretation='Generated support labels only; bounded selection recall is reported, not a global RAGAS or entailment score')
 
 def valid_citations(answer, existing_ids):
     evidence=answer.get('evidence',[])
@@ -204,6 +205,10 @@ def main():
                 time.sleep(2)
             results=[]
             queries=[('cross service incident','What context exists for INC_CORRELATION_73 across web, worker, and auth services?',prod,None),('exact incident','INC_CORRELATION_73',prod,None),('semantic paraphrase','Which services saw payment requests fail because a gateway did not respond?',prod,'web'),('worker scope','INC_CORRELATION_73',prod,'worker'),('auth scope','INC_CORRELATION_73',prod,'auth'),('empty environment','INC_CORRELATION_73',preview,None),('negative','QUANTUM_NONEXISTENT_92731',prod,None)]
+            for config in configs:
+                for index in sorted({min(1,config['count']-1),config['count']//2,config['count']-1}):
+                    identifier=f"{config['run_id']}-{config['app']}-{index:06d}"
+                    queries.append((f"sampled ID {config['app']} {index}",identifier,prod,config['app']))
             other_env=request('GET',f"/projects/{other['id']}/environments")[0]['id']
             queries.append(('empty control project','INC_CORRELATION_73',other_env,None))
             if a.capture_burst and counts(state)['indexed_events']!=a.count:queries=[]
@@ -218,7 +223,7 @@ def main():
                     valid_scope=all(e['project_id']==query_pid and e['environment_id']==eid and (not service or e.get('service')==service) for e in evidence)
                     save(root/('query-'+label.replace(' ','-')+'.json'),answer)
                     results.append(dict(query=label,seconds=round(time.monotonic()-start,3),evidence_count=len(evidence),scope_valid=valid_scope,citations_valid=citations_valid,incident_found='INC_CORRELATION_73' in json.dumps(evidence),empty_expected=label in {'empty environment','negative','empty control project'},status='passed' if valid_scope and citations_valid and (label not in {'exact incident','worker scope','auth scope'} or 'INC_CORRELATION_73' in json.dumps(evidence)) and (label!='cross service incident' or {e.get('service') for e in evidence}=={'web','worker','auth'}) and (bool(evidence) if label not in {'empty environment','negative','empty control project'} else not evidence) else 'failed'))
-                    quality=context_quality(state,configs,label,answer,service)
+                    quality=context_quality(state,configs,label,answer,service,{question} if label.startswith('sampled ID ') else None)
                     results[-1]['context_quality']=quality
                     if not quality['passed']:results[-1]['status']='failed'
                 except Exception as error:results.append(dict(query=label,status='failed',error_category=type(error).__name__))
