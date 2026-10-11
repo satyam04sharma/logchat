@@ -785,7 +785,9 @@
     const groups = new Map();
     evidence.forEach((item, evidenceIndex) => {
       item.__displayReference = `E${evidenceIndex + 1}`;
-      const matching = cells.filter((candidate) => candidate.id === item.cell || asArray(candidate.evidence_ids).includes(item.id));
+      const matching = cells.filter((candidate) => item.cell_id
+        ? (candidate.cell_id || candidate.id) === item.cell_id
+        : candidate.id === item.cell || asArray(candidate.evidence_ids).includes(item.id));
       const labels = matching.length ? matching.map((cell) => [cell.environment, cell.window && cell.window.label].filter(Boolean).join(' · ')) : [textValue(item.environment, 'Retrieved evidence')];
       labels.forEach((key) => {
         if (!groups.has(key)) groups.set(key, []);
@@ -808,7 +810,15 @@
     });
     if (groups.size) output.append(columns);
     let answer = textValue(result.answer, 'No comparison answer was returned.');
-    evidence.forEach((item) => { if (item.id) answer = answer.split(`[${item.id}]`).join(`[${item.__displayReference}]`); });
+    const citationReferences = new Map();
+    evidence.forEach((item) => {
+      if (!item.id) return;
+      if (!citationReferences.has(item.id)) citationReferences.set(item.id, []);
+      citationReferences.get(item.id).push(item.__displayReference);
+    });
+    citationReferences.forEach((references, id) => {
+      answer = answer.split(`[${id}]`).join(`[${references.join(', ')}]`);
+    });
     const verdict = el('article', { className: 'verdict' }, [icon('compare'), el('div', {}, [el('h2', { text: 'What the evidence supports' }), el('p', { text: answer })])]);
     const assumptions = asArray(result.plan && result.plan.assumptions);
     if (assumptions.length) {
@@ -972,10 +982,15 @@
     const fields = ['id', 'project_id', 'environment_id', 'environment', 'source_id', 'source', 'source_kind',
       'service', 'level', 'release', 'fingerprint', 'summary', 'bucket_start', 'bucket_end',
       'event_count', 'duration_count', 'duration_sum_ms', 'duration_min_ms', 'duration_max_ms', 'status_counts',
-      'compression_version', 'loss_notes', 'revalidation'];
+      'compression_version', 'loss_notes', 'revalidation', 'chunk_id', 'original_chunk_id',
+      'cell_id', 'cell_ids', 'query_window', 'facts_scope', 'window', 'first_event_at', 'last_event_at',
+      'evidence_version', 'content_role', 'interpretation', 'original_records_retained',
+      'retained_events', 'important_fields', 'source_observations', 'exact_metrics', 'observed_window'];
     const memory = Object.fromEntries(fields.filter((key) => evidence[key] != null).map((key) => [key, evidence[key]]));
     memory.project_id = memory.project_id || (result.plan && result.plan.project_id) || projectId();
-    const description = result.provenance && result.provenance.embedding
+    const description = evidence.facts_scope === 'retained_events_in_query_cell'
+      ? 'Query-scoped facts from immutable compact evidence; the canonical citation identifies the stored artifact.'
+      : result.provenance && result.provenance.embedding
       ? 'Immutable compressed memory returned with this answer; relevance does not establish cause.'
       : 'Supporting aggregate as returned with this answer; retained buckets may grow.';
     return { memory, provenance: { snapshot: true, description, answer: result.provenance || null }, scope: result.plan || null };

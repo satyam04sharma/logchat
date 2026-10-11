@@ -79,7 +79,7 @@ async def test_direct_and_string_sidecars_preserve_canonical_and_typed_aliases()
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("length", [20, 100])
-@pytest.mark.parametrize("destination", ["summary", "uncertainties"])
+@pytest.mark.parametrize("destination", ["source_phrases", "summary", "uncertainties"])
 @pytest.mark.parametrize("echo", ["producer", "canonical", "projection"])
 async def test_full_body_echoes_reject(length, destination, echo):
     body = "PRIVATE_BODY " + "x" * length
@@ -90,9 +90,10 @@ async def test_full_body_echoes_reject(length, destination, echo):
             text = {"producer": body, "canonical": events[0].message,
                     "projection": normalized_model_message(events[0])}[echo]
             # Preserve the existing >=80 character containment rule as well.
-            if length == 100:
+            if length == 100 and destination != "source_phrases":
                 text = "Model prefix " + text + " suffix"
-            result[destination] = text if destination == "summary" else [text]
+            result[destination] = ([{"record_ref": "e0", "text": text}] if destination == "source_phrases"
+                                   else text if destination == "summary" else [text])
             return result
     with pytest.raises(SectionModelError, match="compact_invalid_output"):
         await compact_summary_batch(original, Echo(), model_events=sidecar(events))
@@ -159,8 +160,8 @@ async def test_mixed_status_section_keeps_each_message_measurement_binding(proje
     serialized = COMPACT_INSTRUCTION + _json(payload) + _json(schema)
     assert len(serialized) <= config.input_character_budget
     assert len(serialized.encode()) <= config.input_byte_budget
-    assert "belong only to that" in COMPACT_INSTRUCTION
-    assert "do not establish source adjacency" in COMPACT_INSTRUCTION
+    assert "complete ordered exact substring membership" in COMPACT_INSTRUCTION
+    assert "not timestamp span, adjacency, cause or recovery" in COMPACT_INSTRUCTION
     assert [content_digest(event) for event in events] == digests
     assert compact.coverage == original.coverage
     assert compact.event_keys == original.event_keys
@@ -218,7 +219,7 @@ async def test_separated_auth_runs_keep_timestamps_span_and_work_sum_distinct(pr
         for key in ("request_status", "duration_ms", "timestamp"):
             assert supplied[key] == canonical[key]
     assert "consecutive" not in _json(payload) and "adjacency" not in _json(payload)
-    assert "do not establish source adjacency" in COMPACT_INSTRUCTION
+    assert "not timestamp span, adjacency, cause or recovery" in COMPACT_INSTRUCTION
     assert "NOT elapsed wall-clock time" in payload["metric_semantics"]["duration_sum_ms"]
     serialized = COMPACT_INSTRUCTION + _json(payload) + _json(schema)
     assert len(serialized) <= config.input_character_budget

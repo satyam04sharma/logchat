@@ -189,13 +189,17 @@ async def embed_batch(batch, provider):
     from logchat.rag.sections import COMPACT_VERSION, validate_compact_chunk
     transports = sorted({validate_compact_chunk(chunk)["version"] for chunk in batch.chunks
                          if chunk.compression_version == COMPACT_VERSION})
+    source_observations = transports == ["compact-evidence-v3"]
+    if source_observations:
+        embedding_detail = "checked_source_observations_fields_and_subset_facts"
     if transports:
         embedding_detail += ";document_transports=" + ",".join(transports)
     compression_models = summary_models if summarized else section_models
     provenance = [
         StageProvenance("compression", "ok" if batch.chunks else "empty", implementation,
                         model=next(iter(compression_models)) if len(compression_models) == 1 else None,
-                        detail="abstractive_model_summary_selected_fields_original_messages_not_retained" if compact else
+                        detail="checked_source_observations_original_messages_not_retained" if source_observations else
+                            "abstractive_model_summary_selected_fields_original_messages_not_retained" if compact else
                             "model_selected_grounded_excerpts_full_records_retained" if summarized else
                             ("exact_local_records_model_partition_only" if implementation.startswith("local-") else "deterministic_generalized_templates_exact_metrics")),
         StageProvenance("embedding", "ok" if batch.chunks else "empty", spec.provider,
@@ -205,6 +209,7 @@ async def embed_batch(batch, provider):
     if summarized:
         provenance.append(StageProvenance("summary", "ok", implementation if compact else "local-model-summary-v1",
             model=next(iter(summary_models)) if len(summary_models) == 1 else None,
-            detail="selected_fields_checked_prose_not_verified_truth_source_detail_coverage_partial" if compact else
+            detail="source_membership_and_fields_checked_source_assertions_not_verified_truth_partial_coverage" if source_observations else
+                "selected_fields_checked_prose_not_verified_truth_source_detail_coverage_partial" if compact else
                 "verbatim_quotes_and_all_reference_memberships_checked_excerpt_selection_not_exhaustive"))
     return BuildResult(batch.batch_id, tuple(embedded), batch.coverage, tuple(provenance))

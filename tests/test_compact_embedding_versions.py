@@ -6,7 +6,7 @@ import unittest
 from logchat.rag.builder import embed_batch
 from logchat.rag.scheduler import _decode, _encode
 from logchat.rag.sections import (
-    COMPACT_VERSION, COMPACT_EVIDENCE_V1, COMPACT_EVIDENCE_V2, _OMISSION_NOTICE,
+    COMPACT_VERSION, COMPACT_EVIDENCE_V1, COMPACT_EVIDENCE_V2, COMPACT_EVIDENCE_V3, _OMISSION_NOTICE,
     _compact_id, _hash, _json, compact_records_for_chunk, compact_summary_batch,
     embedding_text, records_for_chunk, validate_compact_batch, validate_compact_chunk,
 )
@@ -75,12 +75,12 @@ class CompactEmbeddingVersions(unittest.IsolatedAsyncioTestCase):
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, "invalid_compact_evidence"):
                 embedding_text(replace(chunk, compact_evidence=_json(evidence)))
 
-    async def test_new_generation_emits_v2_and_keeps_all_durable_refs(self):
+    async def test_new_generation_emits_v3_and_keeps_all_durable_refs(self):
         compact = await compact_summary_batch(await sections_fixture(), CompactModel())
         validate_compact_batch(compact)
         chunk = compact.chunks[0]
         evidence = validate_compact_chunk(chunk)
-        self.assertEqual(evidence["version"], COMPACT_EVIDENCE_V2)
+        self.assertEqual(evidence["version"], COMPACT_EVIDENCE_V3)
         self.assertTrue(all(field["event_refs"] for field in evidence["important_fields"]))
         self.assertEqual(_json(json.loads(embedding_text(chunk))["important_fields"]),
                          _json([{key: field[key] for key in ("key", "value")}

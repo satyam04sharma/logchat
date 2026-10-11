@@ -52,9 +52,10 @@ class Generation:
         if "items" in context:
             return {"sections": [[item["ref"] for item in context["items"]]]}
         assert "records" in context
-        return {"summary": "The service reported a request failure.",
+        return {"source_phrases": [{"record_ref": row["ref"], "text": "Request failed"}
+                                  for row in context["records"][:1] if "Request failed" in row["message"]],
                 "important_fields": [field["field_ref"] for field in context["field_catalog"]
-                                     if field["key"] == "error_code"], "uncertainties": []}
+                                     if field["key"] == "error_code"]}
 
 
 @pytest_asyncio.fixture

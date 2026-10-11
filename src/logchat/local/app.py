@@ -648,7 +648,9 @@ def create_app(state_dir: str | Path, port: int, *, capture_host: bool = True) -
             if chunk.compression_version == "local-model-compact-v1":
                 from logchat.rag.sections import validate_compact_chunk, compact_records_for_chunk
                 compact = validate_compact_chunk(chunk)
-                result.update(important_fields=compact["important_fields"], uncertainties=compact["uncertainties"],
+                result.update(important_fields=compact["important_fields"],
+                    **({"source_observations": compact["source_observations"]} if "source_observations" in compact
+                       else {"uncertainties": compact["uncertainties"]}),
                     retained_events=list(compact_records_for_chunk(chunk)), original_records_retained=False,
                     content_role="unverified_model_summary_with_preserved_fields")
             if chunk.compression_version in {"local-model-section-v1", "local-model-summary-v1"}:

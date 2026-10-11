@@ -7,7 +7,7 @@ from logchat.rag.builder import embed_batch
 from logchat.rag.sections import (COMPACT_VERSION, SectionModelError, SummaryConfig,
     compact_records_for_chunk, compact_summary_batch, records_for_chunk, section_batch,
     validate_batch, validate_compact_batch, validate_compact_chunk, validate_refinement,
-    _compact_id, _hash, _json)
+    _compact_id, _hash, _json, _compact_pattern_id)
 from tests.test_rag_sections import LocalPartitionModel, SPEC, batch, event
 
 
@@ -23,8 +23,15 @@ class CompactModel:
         self.payloads.append(payload)
         fields = [field["field_ref"] for field in payload["field_catalog"]
                   if field["key"] in {"error_code", "/user/email", "quantity", "active", "nothing", "codes", "/path~1key/~0leaf"}]
-        result = {"summary": "The account service rejected multiple lookups with a shared application error.",
-                  "important_fields": fields, "uncertainties": ["The initiating cause is not established."]}
+        phrases = []
+        for phrase in ("account lookup rejected", "renewal rejected", "operation failed", "request failed",
+                       "rare operation", "Operation", "operation refused"):
+            witness = next((row for row in payload["records"]
+                            if phrase in row["message"] and phrase != row["message"].strip()), None)
+            if witness:
+                phrases = [{"record_ref": witness["ref"], "text": phrase}]
+                break
+        result = {"source_phrases": phrases, "important_fields": fields}
         if self.mode == "empty_fields": result["important_fields"] = []
         if self.mode == "invented": result["important_fields"][0] = "f999"
         if self.mode == "renamed": result["important_fields"][0] = "error_code"
@@ -36,7 +43,7 @@ class CompactModel:
         if self.mode == "type_changed": result["important_fields"] = [{"key": "quantity", "value": 2.0, "event_refs": ["e0"]}]
         if self.mode == "empty_summary": result["summary"] = ""
         if self.mode == "long_summary": result["summary"] = "x" * 1601
-        if self.mode == "echo": result["summary"] = payload["records"][0]["message"]
+        if self.mode == "echo": result["source_phrases"] = [{"record_ref": "e0", "text": payload["records"][0]["message"]}]
         if self.mode == "timeout": raise TimeoutError("PRIVATE_DIAGNOSTIC")
         if self.mode == "provider": raise RuntimeError("PRIVATE_DIAGNOSTIC")
         return result
@@ -99,7 +106,7 @@ class CompactTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["traceId"], "trace-73")
         validate_refinement(original, compact)
 
-    async def test_abstractive_summary_keeps_exact_selected_fields_but_no_raw_support(self):
+    async def test_source_observations_keep_exact_selected_fields_but_no_raw_support(self):
         original = await sections_fixture()
         model = CompactModel()
         compact = await compact_summary_batch(original, model)
@@ -129,7 +136,7 @@ class CompactTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn({"key": "/user/email", "value": f"visitor{index}@example.com"}, row["important_fields"])
         self.assertEqual(records_for_chunk(chunk), rows)
         self.assertIn("source_detail_coverage_partial", chunk.loss_notes)
-        self.assertIn("model_summary_not_verified_truth", chunk.loss_notes)
+        self.assertIn("source_membership_checked_before_disposal", chunk.loss_notes)
         self.assertEqual(compact.coverage, original.coverage)
         validate_refinement(original, compact)
         validate_compact_batch(compact)
@@ -143,17 +150,11 @@ class CompactTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(model.calls, 1)
         self.assertIsNone(original.chunks[0].compact_evidence)
 
-    async def test_repeated_valid_selection_keeps_exact_fields_membership_and_metrics(self):
+    async def test_repeated_selection_rejects_without_normalization(self):
         original = await sections_fixture()
-        expected = await compact_summary_batch(original, CompactModel())
-        actual = await compact_summary_batch(original, CompactModel("duplicate"))
-        self.assertEqual(actual.chunks[0].compact_evidence, expected.chunks[0].compact_evidence)
-        self.assertEqual(actual.chunks[0].summary, expected.chunks[0].summary)
-        self.assertEqual(actual.coverage, expected.coverage)
-        self.assertEqual(actual.event_keys, expected.event_keys)
-        self.assertIn("compact_exact_duplicate_selections_removed", actual.chunks[0].loss_notes)
-        validate_refinement(original, actual)
-        validate_compact_batch(actual)
+        with self.assertRaisesRegex(SectionModelError, "compact_invalid_output"):
+            await compact_summary_batch(original, CompactModel("duplicate"))
+        self.assertIsNone(original.chunks[0].compact_evidence)
 
     async def test_empty_selection_preserves_correlation_and_declares_other_loss(self):
         compact = await compact_summary_batch(await sections_fixture(), CompactModel("empty_fields"))
@@ -162,7 +163,7 @@ class CompactTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({field["value"] for field in evidence["important_fields"] if field["key"] == "/user/email"},
                          {"visitor0@example.com", "visitor1@example.com", "visitor2@example.com"})
         self.assertIn("correlation_fields_preserved_independently_of_model_selection", compact.chunks[0].loss_notes)
-        self.assertTrue(any("omitted source details" in text for text in evidence["uncertainties"]))
+        self.assertIn("omitted source details", compact.chunks[0].summary)
         self.assertIs(await compact_summary_batch(compact, None), compact)
         self.assertIs(await section_batch(compact, None), compact)
         validate_refinement(compact, compact)
@@ -232,7 +233,7 @@ class CompactTests(unittest.IsolatedAsyncioTestCase):
         field["value"] = 2.0  # Distinguish original JSON integer from normalized float.
         encoded = _json(evidence)
         changed = replace(chunk, compact_evidence=encoded,
-                          pattern_id=_hash([COMPACT_VERSION, chunk.summary, evidence["important_fields"]]))
+                          pattern_id=_compact_pattern_id(evidence, chunk.summary))
         changed = replace(changed, chunk_id=_compact_id(changed, encoded, changed.summary, changed.summary_model))
         validate_compact_chunk(changed)  # Originals are intentionally unavailable at this layer.
         with self.assertRaisesRegex(ValueError, "field_mismatch"):
@@ -264,11 +265,12 @@ class CompactTests(unittest.IsolatedAsyncioTestCase):
         provider = Provider()
         result = await embed_batch(compact, provider)
         value = json.loads(provider.texts[0])
-        self.assertEqual(set(value), {"model_summary", "important_fields", "exact_metrics"})
+        self.assertEqual(set(value), {"evidence_version", "render_version", "embedding_version", "summary",
+            "source_observations", "whole_section_facts", "important_fields", "measurement_notice"})
         self.assertNotIn("RAW_BODY_CANARY", provider.texts[0])
         self.assertNotIn("RAW_FINGERPRINT_CANARY", provider.texts[0])
-        self.assertEqual(value["exact_metrics"]["event_count"], 3)
-        self.assertEqual(value["exact_metrics"]["duration_sum_ms"], 4.5)
+        self.assertEqual(value["whole_section_facts"]["exact_metrics"]["event_count"], 3)
+        self.assertEqual(value["whole_section_facts"]["exact_metrics"]["duration_sum_ms"], 4.5)
         self.assertIn("not_verified_truth", next(stage for stage in result.provenance if stage.stage == "summary").detail)
 
     async def test_model_attestation_budgets_and_errors_are_safe(self):

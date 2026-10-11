@@ -274,7 +274,7 @@ def _identifier_in_record(identifier, record):
                _scalars({key: value for key, value in record.items() if key != "event_key"}))
 
 
-def _readable_records(candidate):
+def _readable_records(candidate, cell=None):
     """Decode final local sections; omit the derived replay hash, not source data."""
     from logchat.rag.sections import RECORD_PREFIX, SECTION_VERSION, SUMMARY_VERSION, COMPACT_VERSION, records_for_chunk
     chunk = candidate.chunk
@@ -282,8 +282,12 @@ def _readable_records(candidate):
         return None
     if chunk.compression_version == SECTION_VERSION and not chunk.summary.startswith(RECORD_PREFIX):
         return None
-    return tuple({key: value for key, value in row.items() if key != "event_key"}
-                 for row in records_for_chunk(chunk))
+    if chunk.compression_version == COMPACT_VERSION:
+        from logchat.rag.sections import active_compact_context
+        rows = active_compact_context(chunk, cell)["retained_events"]
+    else:
+        rows = records_for_chunk(chunk)
+    return tuple({key: value for key, value in row.items() if key != "event_key"} for row in rows)
 
 
 def _literal_candidate_scope(question, cells, by_cell, *, preserve_content=True):
@@ -292,12 +296,13 @@ def _literal_candidate_scope(question, cells, by_cell, *, preserve_content=True)
     Derive anchors from the complete scoped candidate pool. Alternatives in one
     original field are OR; different fields must co-occur in one source record.
     """
+    from logchat.rag.sections import active_summary
     if not preserve_content:
         requested = _requested_identifiers(question)
         anchors = {("requested_identifier", value): {value} for value in requested}
         excluded = tuple((candidate.cell_id, candidate.chunk.chunk_id)
                          for options in by_cell.values() for candidate in options
-                         if not all(_literal_in_question(value, candidate.chunk.summary) for value in requested))
+                         if not all(_literal_in_question(value, active_summary(candidate.chunk)) for value in requested))
         filtered = {cell: [candidate for candidate in options
                           if (candidate.cell_id, candidate.chunk.chunk_id) not in excluded]
                     for cell, options in by_cell.items()}
@@ -306,7 +311,7 @@ def _literal_candidate_scope(question, cells, by_cell, *, preserve_content=True)
     for cell in cells:
         for candidate in by_cell[cell.cell_id]:
             key = candidate.cell_id, candidate.chunk.chunk_id
-            decoded = _readable_records(candidate)
+            decoded = _readable_records(candidate, cell)
             if decoded is None:
                 continue
             records[key] = decoded
@@ -324,9 +329,14 @@ def _literal_candidate_scope(question, cells, by_cell, *, preserve_content=True)
                       if not any(_literal_in_question(value, anchor) for anchor in anchored_values))
     for value in requested:
         anchors[("requested_identifier", value)] = {value}
+    # Empty projections cannot provide positive evidence without anchors either.
+    empty = {key for key, rows in records.items() if not rows}
+    by_cell = {cell: [candidate for candidate in options
+                     if (cell, candidate.chunk.chunk_id) not in empty]
+               for cell, options in by_cell.items()}
     if not anchors:
-        return by_cell, records, {}, {}, ()
-    matched, filtered, exclusions = {}, {}, []
+        return by_cell, records, {}, {}, tuple(sorted(empty))
+    matched, filtered, exclusions = {}, {}, list(sorted(empty))
     for cell in cells:
         kept = []
         for candidate in by_cell[cell.cell_id]:
@@ -414,7 +424,7 @@ def _identifiers(question):
 
 
 def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content=False, uncapped=False):
-    from logchat.rag.sections import SUMMARY_VERSION, COMPACT_VERSION, records_for_chunk
+    from logchat.rag.sections import SUMMARY_VERSION, COMPACT_VERSION, records_for_chunk, active_summary
     chunks, vectors, lexical = {}, {}, {}
     for hits, target in ((vector_hits, vectors), (lexical_hits, lexical)):
         for hit in hits:
@@ -429,22 +439,30 @@ def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content
     candidates, rejected = [], 0
     for identifier, chunk in chunks.items():
         vector, lex = vectors.get(identifier), lexical.get(identifier)
+        if chunk.compression_version == COMPACT_VERSION:
+            from logchat.rag.sections import active_compact_context
+            active_records = active_compact_context(chunk, cell)["retained_events"]
+            if not active_records:
+                rejected += 1
+                continue
+        else:
+            active_records = records_for_chunk(chunk) if chunk.compression_version == SUMMARY_VERSION else ()
         if standalone:
             if preserve_content and chunk.compression_version in {SUMMARY_VERSION, COMPACT_VERSION}:
-                supported = any(_identifier_in_record(standalone[0], row) for row in records_for_chunk(chunk))
+                supported = any(_identifier_in_record(standalone[0], row) for row in active_records)
             else:
-                supported = _literal_in_question(standalone[0], chunk.summary)
+                supported = _literal_in_question(standalone[0], active_summary(chunk, cell))
             if not supported:
                 rejected += 1
                 continue
         exact = bool(lex and identifiers.intersection(token.casefold() for token in
-                     _TOKEN.findall(chunk.summary + " " + chunk.pattern_id)))
+                     _TOKEN.findall(active_summary(chunk, cell) + " " + chunk.pattern_id)))
         if lex and preserve_content and chunk.compression_version in {SUMMARY_VERSION, COMPACT_VERSION} and not exact:
             # Summary embeddings can omit contacts and arbitrary literal values.
             # Require both an actual lexical hit and exact original-field match;
             # this admits candidates only, never bypassing model relevance.
             exact = any(_literal_in_question(value, question)
-                        for record in records_for_chunk(chunk)
+                        for record in active_records
                         for values in _record_values(record).values() for value in values)
         if not exact and (vector is None or vector.score < config.min_vector_similarity):
             rejected += 1
@@ -585,7 +603,7 @@ async def retrieve(question: str, cells: Sequence[RetrievalCell], backend: Searc
                 # Keep malformed retained sections local to the failing cell,
                 # before deriving shared anchors across other valid cells.
                 for candidate in ranked:
-                    _readable_records(candidate)
+                    _readable_records(candidate, cell)
             pools[cell.cell_id] = (ranked, vectors, lexical, rejected)
         except Exception:
             gaps.append(f"{cell.cell_id}:candidate_search_unavailable_or_invalid")
@@ -610,7 +628,9 @@ async def retrieve(question: str, cells: Sequence[RetrievalCell], backend: Searc
             gaps.append(f"{cell.cell_id}:literal_or_service_witnesses_exceed_candidate_limit")
         if not selected:
             gaps.append(f"{cell.cell_id}:no_relevant_candidates")
-        if any(c.chunk.window.start < cell.window.start or c.chunk.window.end > cell.window.end for c in selected):
+        from logchat.rag.sections import COMPACT_VERSION
+        if any(c.chunk.compression_version != COMPACT_VERSION and
+               (c.chunk.window.start < cell.window.start or c.chunk.window.end > cell.window.end) for c in selected):
             gaps.append(f"{cell.cell_id}:boundary_chunk_metrics_not_window_exact")
         detail = {"cell_id": cell.cell_id, "vector_returned": len(vectors),
                   "lexical_returned": len(lexical), "gate_rejected": rejected,

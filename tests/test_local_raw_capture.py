@@ -195,9 +195,9 @@ class Generation:
             raise RuntimeError(RAW)
         if "items" in context:
             return {"sections": [[item["ref"] for item in context["items"]]]}
-        return {"summary": "The service reported request errors.",
-                "important_fields": [field["field_ref"] for field in context["field_catalog"] if field["key"] == "error_code"],
-                "uncertainties": []}
+        assert set(schema['properties']) == {'source_phrases', 'important_fields'}
+        return {"source_phrases": [{"record_ref": context["records"][0]["ref"], "text": "Request failed"}],
+                "important_fields": [field["field_ref"] for field in context["field_catalog"] if field["key"] == "error_code"]}
 
 
 @pytest.fixture
