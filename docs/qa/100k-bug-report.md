@@ -15,9 +15,10 @@ Current release status: **not ready to publish as a validated 100K demo**. Insta
 | Repeated incident candidates crowd out a requested service | Corrected candidate; independent crowding, joint-match and comparison-alternative probes pass |
 | Incomplete vector/citation acceptance checks | QA corrected; corruption probes reject incomplete evidence |
 | Digest ledger only counted, not fully reconciled | QA corrected; all canonical values/scopes/job bindings checked and seven corruption probes rejected |
-| Actual multi-service model selection fails validation | Duplicate references and contradictory decisions confirmed; label-only correction passes structural review, while actual acceptance remains blocked by input truncation |
+| Actual multi-service model selection fails validation | Duplicate references and contradictory decisions corrected structurally; full-input proofs now expose a separate order-sensitive auth relevance omission |
 | Summary metric attribution and unsupported source adjacency | Confirmed prose-fidelity bugs; per-record input correction reviewed, actual corrected prose proof still outstanding |
-| Relevance prompts silently truncated by the native provider | Confirmed numeric server warnings correlate with failed and apparently successful probes; lossless input correction and full-fit proof required |
+| Relevance prompts silently truncated by the native provider | Reviewed lossless transport and native guard pass actual overflow rejection and exact full-input/provider-token reconciliation for measured requests |
+| Joint relevance decisions omit an eligible source | Full-input exact lookup fails twice with auth rejected; one unchanged-evidence rotation selects all services. Independent classification implementation is staged; active-route integration and actual acceptance are pending |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
