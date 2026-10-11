@@ -31,7 +31,7 @@ Current release status: **not ready to publish as a validated 100K demo**. The l
 | Auth compaction exceeds the intake deadline after exact packing | Fresh cycle: 27 physical requests, 15 completed, request 16 canceled at 300 seconds; lossless input-factoring correction delegated |
 | Failed-run checker aborts while reconciling a canceled document response | New private checker candidate preserves strict failures and distinguishes returned/canceled/unattempted requests; independent review pending |
 | Server shutdown leaves diagnostic ledgers unsealed | New private checker candidate seals before Uvicorn forwards SIGTERM; independent review pending |
-| Published incident quotes omit the operational subject | Original failed cycle offers exact incident-bound operation/outcome choices, but selected web/worker quotes omit useful operation context; generic selector correction delegated |
+| Published incident quotes omit the operational subject | Original failed cycle offers exact incident-bound operation/outcome choices, but selected web/worker quotes omit useful operation context; generic selector policy integrated after independent review; fresh actual usefulness remains unproved |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
@@ -510,3 +510,10 @@ A pure, read-only check of the original failed fresh cycle's 23 published web ch
 
 
 Independent saved-request replay confirms catalog construction did not exclude the operational subject. The web incident request had 51 bound choices, including 29 incident-eligible choices, five complete operation proposals, eleven outcome proposals and two covering both. Selected incident quotes omitted the operation; published quote hashes equal the actual model selections. The worker singleton offered five operation proposals, eight outcome proposals and two combined choices, but its four selected quotes omit both complete anchors. Worker was prepared but not published. Auth offered all expected categories, but its incident request was never submitted; no auth selector failure is claimed. Choices remain available in the dictionary payload after exact expansion. GNHF is correcting the generic selection policy; fresh model usefulness remains unproved.
+
+
+## Reviewed generic quote-selection policy
+
+The shared legacy/catalog instruction now asks for safe quotes that jointly identify the operation or subject and what happened, preferring informative combined or complementary multiword phrases and preserving distinctive rare-failure context. It contains no dataset-specific operation words, service IDs, incident anchors or forced selections. Every source choice, schema, four-phrase limit, privacy rule, membership check and historical representation remains unchanged. Independent policy review passes; the unrestricted suite passes 1,831 tests and 576 subtests, with two existing skips. This instruction correction is not proof of actual model usefulness.
+
+A separate actual default-counter measurement of the final policy preserves all 400 members per service and completes 50 vocabulary counts with nine metadata requests, zero generation/embedding/intake calls, and three owned workers exiting successfully with staging removed. Complete plans remain 19 web requests (70,137 input tokens), 16 worker requests (66,857), and 15 auth requests (90,803; maximum 6,779). All fit within the unchanged 8,192-token context including the 1,200-token output reserve. The new checker still needs its final source binding and independent activation review before a fresh actual whole-workload run.
