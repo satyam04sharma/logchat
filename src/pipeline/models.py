@@ -434,6 +434,7 @@ class LocalModels:
             raise ModelUnavailable(str(error)) from None
 
     async def _generate(self, body, schema):
+        """Validate against the submitted snapshot; schema stays for QA compatibility."""
         await self._require_generation_context_guard()
         if self.generation_token_counter is not None:
             if not await self._preflight_generation_body(body):
@@ -464,7 +465,7 @@ class LocalModels:
             value = json.loads(data["response"], object_pairs_hook=_unique_json_object)
             if not self.preserve_content:
                 value = sanitize(value)
-            return _validate_schema(value, schema)
+            return _validate_schema(value, body["format"])
         except (KeyError, ValueError, TypeError):
             raise ModelUnavailable("Local model returned invalid structured output.") from None
 
