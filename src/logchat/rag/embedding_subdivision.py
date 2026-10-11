@@ -318,7 +318,11 @@ def validate_embedding_plan(original, plan, provider):
     """
     from logchat.rag.embeddings import MAX_TEXTS
     from pipeline.model_transport import model_json
-    if (plan.lineage != validate_subdivision(original, plan.batch)
+    # Exact types must precede equality: bools/floats can equal canonical ints.
+    # Reconstructed lineage then binds interval bounds, order and coverage.
+    if (any(type(value) is not int for leaf in plan.lineage.leaves
+            for value in (leaf.parent_index, leaf.record_start, leaf.record_end))
+            or plan.lineage != validate_subdivision(original, plan.batch)
             or plan.spec != provider.spec or plan.spec.dimensions != 768
             or plan.spec.provider != 'ollama' or provider.preserve_content is not True
             or plan.physical_flags != (True, True)
@@ -331,7 +335,8 @@ def validate_embedding_plan(original, plan, provider):
     for chunk, document in zip(plan.batch.chunks, plan.documents):
         body = provider.request_body([embedding_text(chunk)])
         text = body['input'][0]
-        if (document.chunk_id != chunk.chunk_id or document.input_sha256 != _digest(text)
+        if (type(document.input_bytes) is not int
+                or document.chunk_id != chunk.chunk_id or document.input_sha256 != _digest(text)
                 or document.input_bytes != len(text.encode('utf-8'))
                 or document.request_sha256 != _digest(model_json(body))
                 or type(document.physical_tokens) is not int
@@ -341,7 +346,8 @@ def validate_embedding_plan(original, plan, provider):
         offset = index * MAX_TEXTS
         chunks = plan.batch.chunks[offset:offset + MAX_TEXTS]
         body = provider.request_body([embedding_text(chunk) for chunk in chunks])
-        if (admission.first_document != offset or admission.document_count != len(chunks)
+        if (type(admission.first_document) is not int or type(admission.document_count) is not int
+                or admission.first_document != offset or admission.document_count != len(chunks)
                 or not _check_proof(admission.proof, model_json(body).encode(), plan.spec, plan.identity)
                 or admission.proof.physical_tokens != tuple(
                     d.physical_tokens for d in plan.documents[offset:offset + MAX_TEXTS])):
