@@ -12,7 +12,6 @@ import json
 import os
 from pathlib import Path
 import sys
-from urllib.parse import urlparse
 
 import httpx
 
@@ -125,21 +124,27 @@ class OllamaCounter:
         self._cache = OrderedDict()
         self._lock = asyncio.Lock()
         self._closed = False
-        self._endpoint = client.base_url
+        from pipeline.models import _LocalRequestBinding
+        self._binding = _LocalRequestBinding(client.base_url, client.transport, self.model, embedding)
 
-    async def verify_provider(self):
+    def _check_binding(self):
         if self._closed or asyncio.get_running_loop().time() >= self.deadline:
             raise incompatible('expired or closed plan')
-        parsed = urlparse(self.client.base_url)
-        if (self.client.base_url != self._endpoint or parsed.hostname not in {'localhost', '127.0.0.1', '::1'}
-                or parsed.scheme not in {'http', 'https'} or parsed.username or parsed.password
-                or parsed.query or parsed.fragment or parsed.path not in {'', '/'}):
-            raise incompatible('same-host loopback required')
-        async with httpx.AsyncClient(trust_env=False, follow_redirects=False,
-                                     transport=self.client.transport, timeout=10) as http:
-            version = await self.client._read_json(http, 'GET', '/api/version')
-            tags = await self.client._read_json(http, 'GET', '/api/tags')
-            show = await self.client._read_json(http, 'POST', '/api/show', body={'model': self.model})
+        self._binding.check(self.client)
+
+    async def verify_provider(self):
+        self._check_binding()
+        with self.client._bind_requests(self._binding):
+            async with httpx.AsyncClient(trust_env=False, follow_redirects=False,
+                                         transport=self._binding.transport, timeout=10) as http:
+                self._check_binding()
+                version = await self.client._read_json(http, 'GET', '/api/version')
+                self._check_binding()
+                tags = await self.client._read_json(http, 'GET', '/api/tags')
+                self._check_binding()
+                show = await self.client._read_json(http, 'POST', '/api/show', body={'model': self.model})
+                self._check_binding()
+        self._check_binding()
         expected = MODELS[canonical(self.model)][0]
         matches = [row for row in tags.get('models', []) if canonical(row.get('name', '')) == canonical(self.model)]
         if version.get('version') != '0.34.4':
@@ -209,11 +214,11 @@ class OllamaCounter:
     async def count(self, request_bytes):
         try:
             async with asyncio.timeout_at(self.deadline), self._lock:
-                if self._closed:
-                    raise incompatible('closed plan')
+                self._check_binding()
                 body = self._body(request_bytes)
                 if self.runtime is None:
                     await self._open()
+                self._check_binding()
                 self.runtime._check_assets()  # including on every cache hit
                 if asyncio.get_running_loop().time() >= self.deadline:
                     raise TimeoutError
@@ -234,6 +239,7 @@ class OllamaCounter:
                     rendered = ('[INST] ' + body['system'] + '\n\n' + body['prompt'] + '[/INST]').encode()
                     count = await self.runtime.count(rendered, add_special=True, parse_special=True)
                     proof = GenerationTokenCount(self.identity, key[1], count)
+                self._check_binding()
                 self._cache[key] = proof
                 if len(self._cache) > 512:
                     self._cache.popitem(last=False)

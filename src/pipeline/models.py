@@ -5,7 +5,8 @@ import json
 import math
 import os
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass, replace
 from contextvars import ContextVar
 import socket
 from ipaddress import ip_address
@@ -130,6 +131,44 @@ def _validate_schema(value, schema, path="response"):
     return value
 
 
+@dataclass(frozen=True)
+class _LocalRequestBinding:
+    """Task-scoped routing and exact generation bytes; never read routing after await."""
+    endpoint: str
+    transport: object
+    model: str
+    embedding: bool = False
+    request_bytes: bytes | None = None
+    counter: object = None
+    identity: object = None
+
+    def check(self, owner, endpoint=None, body=None):
+        from pipeline.native_tokenizer.ollama import incompatible
+        model = owner.embedding_model if self.embedding else owner.chat_model
+        parsed = urlparse(self.endpoint)
+        if (parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+                or parsed.scheme not in {"http", "https"} or parsed.username or parsed.password
+                or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
+            raise incompatible("same-host loopback required")
+        if (owner.base_url != self.endpoint or owner.transport is not self.transport
+                or model != self.model):
+            raise incompatible("request routing identity")
+        if (self.request_bytes is not None and owner.generation_token_counter is not self.counter
+                or self.identity is not None and self.counter.identity != self.identity):
+            raise incompatible("complete request identity")
+        if endpoint == "/api/generate" and self.request_bytes is not None:
+            try:
+                matches = model_json(body).encode() == self.request_bytes
+            except (ValueError, TypeError):
+                matches = False
+            if not matches:
+                raise incompatible("complete request identity")
+        if self.counter is not None:
+            from pipeline.native_tokenizer.ollama import OllamaCounter
+            if isinstance(self.counter, OllamaCounter):
+                self.counter._check_binding()
+
+
 class LocalModels:
     def __init__(self, base_url=None, chat_model=None, embedding_model=None, transport=None, *, preserve_content=False, generation_token_counter=None):
         self.base_url = base_url or os.getenv("OLLAMA_URL", "http://ollama:11434")
@@ -147,6 +186,7 @@ class LocalModels:
         self.transport = transport
         self._injected_token_counter = generation_token_counter
         self._token_session = ContextVar("local_model_token_session", default=None)
+        self._request_binding = ContextVar("local_model_request_binding", default=None)
         self._generation_token_identity = getattr(generation_token_counter, "identity", None)
 
     @property
@@ -190,6 +230,31 @@ class LocalModels:
         finally:
             await counter.aclose()
 
+    @contextmanager
+    def _bind_requests(self, binding):
+        token = self._request_binding.set(binding)
+        try:
+            binding.check(self)
+            yield
+        finally:
+            self._request_binding.reset(token)
+
+    @asynccontextmanager
+    async def _response(self, client, method, endpoint, body):
+        binding = self._request_binding.get()
+        if binding is not None:
+            binding.check(self, endpoint, body)
+        # Build immutable URL and serialized content before the send can suspend.
+        request = client.build_request(method,
+            (binding.endpoint if binding is not None else self.base_url) + endpoint, json=body)
+        response = await client.send(request, stream=True)
+        try:
+            if binding is not None:
+                binding.check(self, endpoint, body)
+            yield response
+        finally:
+            await response.aclose()
+
     async def installed(self):
         try:
             async with httpx.AsyncClient(trust_env=False, transport=self.transport, timeout=10) as client:
@@ -207,7 +272,7 @@ class LocalModels:
     async def _read_json(self, client, method, endpoint, *, body=None):
         # Bound the actual streamed bytes before JSON decoding; Content-Length
         # can be absent or incorrect. A model's num_predict is not a wire limit.
-        async with client.stream(method, self.base_url + endpoint, json=body) as response:
+        async with self._response(client, method, endpoint, body) as response:
             if endpoint == "/api/generate" and response.status_code == 400:
                 # Never expose provider content. Read only a bounded known JSON
                 # error envelope; unrelated or malformed 400s stay generic.
@@ -234,12 +299,22 @@ class LocalModels:
         value = json.loads(data, object_pairs_hook=_unique_json_object)
         if not isinstance(value, dict):
             raise ModelUnavailable("Local model returned an invalid response object.")
+        binding = self._request_binding.get()
+        if binding is not None:
+            binding.check(self, endpoint, body)
         return value
 
     async def _post(self, endpoint, body, timeout=180):
+        from pipeline.native_tokenizer.ollama import CompatibilityError
+        binding = self._request_binding.get()
+        if binding is not None:
+            binding.check(self, endpoint, body)
         try:
-            async with httpx.AsyncClient(trust_env=False, follow_redirects=False, transport=self.transport, timeout=timeout) as client:
+            async with httpx.AsyncClient(trust_env=False, follow_redirects=False,
+                    transport=binding.transport if binding is not None else self.transport, timeout=timeout) as client:
                 return await self._read_json(client, "POST", endpoint, body=body)
+        except CompatibilityError as error:
+            raise ModelUnavailable(str(error)) from None
         except ModelUnavailable:
             raise
         except httpx.HTTPStatusError as error:
@@ -256,11 +331,15 @@ class LocalModels:
         return {"ok": True, "model": model}
 
     async def _require_generation_context_guard(self):
+        from pipeline.native_tokenizer.ollama import CompatibilityError
+        binding = self._request_binding.get()
+        if binding is not None:
+            binding.check(self)
         # Recheck each generation so daemon restarts/model replacement cannot
         # inherit a stale capability cache. Metadata requests do not generate.
         try:
             async with httpx.AsyncClient(trust_env=False, follow_redirects=False,
-                    transport=self.transport, timeout=180) as client:
+                    transport=binding.transport if binding is not None else self.transport, timeout=180) as client:
                 version = await self._read_json(client, "GET", "/api/version")
                 if version.get("version") not in VERIFIED_CONTEXT_GUARD_VERSIONS:
                     raise ModelUnavailable("Local generation requires a verified Ollama context guard (0.34.4).")
@@ -281,6 +360,8 @@ class LocalModels:
                     raise ModelUnavailable("Local generation backend does not have a verified lossless context guard.")
         except ModelUnavailable:
             raise
+        except CompatibilityError as error:
+            raise ModelUnavailable(str(error)) from None
         except Exception:
             raise ModelUnavailable("Local generation context guard could not be verified.") from None
 
@@ -338,13 +419,31 @@ class LocalModels:
         if self.preserve_content and self.transport is None and self.generation_token_counter is None:
             async with self.generation_token_session():
                 return await self.generate(instruction, context, schema)
+        from pipeline.native_tokenizer.ollama import OllamaCounter, CompatibilityError
+        counter = self.generation_token_counter
+        binding = (counter._binding if isinstance(counter, OllamaCounter) else
+                   _LocalRequestBinding(self.base_url, self.transport, self.chat_model))
         body = self.generation_request(instruction, context, schema)
+        if not self.preserve_content and not isinstance(counter, OllamaCounter):
+            return await self._generate(body, schema)
+        binding = replace(binding, request_bytes=model_json(body).encode(), counter=counter)
+        try:
+            with self._bind_requests(binding):
+                return await self._generate(body, schema)
+        except CompatibilityError as error:
+            raise ModelUnavailable(str(error)) from None
+
+    async def _generate(self, body, schema):
         await self._require_generation_context_guard()
         if self.generation_token_counter is not None:
             if not await self._preflight_generation_body(body):
                 raise GenerationContextExceeded("Local model input exceeds its native context limit.")
         from pipeline.native_tokenizer.ollama import OllamaCounter, CompatibilityError
         counter = self.generation_token_counter
+        binding = self._request_binding.get()
+        if binding is not None:
+            binding.check(self, "/api/generate", body)
+            self._request_binding.set(replace(binding, identity=getattr(counter, "identity", None)))
         if isinstance(counter, OllamaCounter):
             try:
                 await counter.verify_provider()
@@ -353,7 +452,12 @@ class LocalModels:
             except Exception:
                 from pipeline.native_tokenizer.ollama import incompatible
                 raise ModelUnavailable(str(incompatible("provider verification failed"))) from None
+        binding = self._request_binding.get()
+        if binding is not None:
+            binding.check(self, "/api/generate", body)
         data = await self._post("/api/generate", body)
+        if binding is not None:
+            binding.check(self, "/api/generate", body)
         if data.get("done_reason") == "length":
             raise ModelUnavailable("Local model exhausted its output budget.")
         try:
