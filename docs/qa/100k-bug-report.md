@@ -49,3 +49,15 @@ After integration, 648 tests and 244 subtests passed with one opt-in model test 
 A fresh real Mistral 7B/nomic-embed-text check sent 400 unique web events with six distinct messages and one rare incident through native summary-only HTTP intake. It failed after 300.052 seconds with `compact_intake_unavailable_retry_required`, phase `intake`. Indexed events, vectors, event keys, event digests and scheduled jobs were all zero. The owned server was stopped. The initial fixture setup omitted the required environment and stopped before ingestion; that setup error was corrected in fresh state before this measured run.
 
 This cycle confirms that the grouping optimization alone has not resolved native preparation throughput. The release remains blocked pending a verified preparation correction, actual 400-event completion, installed-browser recall, and a fresh fully indexed 100K cycle. The acceptance harness now checks every expected synthetic event ID and source-ledger key, exact per-source durations/status counts, no pending or failed work, three-service incident context, negative/scope/auth checks, and capture restart/replay. Its accounting gate independently rejected disposable copies with a missing event or changed duration total.
+
+## Native normalization prevents repeated-message reuse
+
+Independent boundary reproduction sent the unchanged 400-event web fixture through `connectors.local.parse_event(..., preserve_fields=True)`. Six distinct input messages became 400 distinct normalized messages. `event_id` is not in the parser's known field set, so every unique ID is appended in the `Structured fields` suffix despite already being preserved in authoritative event metadata. Exact-message cohorts consequently cannot reuse the grouping work observed in simpler `LogEvent` fixtures. A fresh instrumented model run reached more than 30 grouping calls before compaction.
+
+Acceptance: eliminate redundant attribution from the model projection without losing exact event IDs, arbitrary source fields, correlation identifiers or rare failures. Verify the actual push parser/HTTP boundary, not only direct fixture objects, and repeat the real-model 400-event and full 100K gates.
+
+## Acceptance checker review corrections
+
+Independent review exposed two false-acceptance gaps in the rehearsal itself: event accounting could pass with all vectors removed, and selected evidence could pass with only a partial actual citation list. The harness now requires an exact chunk/vector row-ID, scope and time binding plus full-text row completeness, and actual citation coverage with source/window binding and inline references. A disposable backup with zero vectors and JSON copies with partial, wrong-source or missing-inline citations all fail the corrected checks.
+
+A proposed diagnostic change was separately withheld from the release branch after review found that logging-handler failure could replace cancellation, and diagnostics construction failure could leak the intake slot. The delegated runtime correction must make diagnostics nonfatal and preserve release/cancellation guarantees before integration.
