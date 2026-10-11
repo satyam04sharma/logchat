@@ -15,7 +15,8 @@ Current release status: **not ready to publish as a validated 100K demo**. Insta
 | Repeated incident candidates crowd out a requested service | Corrected candidate; independent crowding, joint-match and comparison-alternative probes pass |
 | Incomplete vector/citation acceptance checks | QA corrected; corruption probes reject incomplete evidence |
 | Digest ledger only counted, not fully reconciled | QA corrected; all canonical values/scopes/job bindings checked and seven corruption probes rejected |
-| Actual multi-service model selection fails validation | New blocking finding in fresh pilot cycle 2; exact response diagnosis in progress |
+| Actual multi-service model selection fails validation | Duplicate references confirmed; fixed-key contract passes structural review and exact-incident proof, but cross-service proof still fails validation |
+| Summary metric attribution and unsupported source adjacency | Confirmed prose-fidelity bugs; per-record input correction reviewed, actual corrected prose proof still outstanding |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
@@ -150,3 +151,22 @@ Observed indexing took 593.770 seconds from first smoke submission, including po
 Fifteen of the seventeen final query checks passed. The pending-drain web query also passed while 400 events remained queued. The cross-service incident question and exact incident identifier both failed with `remapper_invalid_model_selection`. Each actual request supplied all three eligible service memories within the existing input budget, but no model selection survived strict validation. Candidate availability therefore does not establish usable multi-service context. The failed pilot remains failed; storage completeness does not override the retrieval gate.
 
 Static review narrows the remaining failure to the model-selection response contract, but does not establish its exact cause. A bounded read-only actual-model probe must record a content-free validation reason before choosing a correction. Preserve strict confidence, reference uniqueness, cell membership, scope, citation and budget checks; do not promote candidates or weaken acceptance to hide the failure. A fresh full simulation remains required after correction.
+
+
+## Actual selection diagnosis and incomplete correction proof
+
+Two bounded actual model probes reconstructed the original failed requests without intake or regeneration. Both returned three selections with two unique references, one duplicate and valid confidence values. Strict validation rejected them with `selection_membership_violation`. A third diagnostic changed only candidate reference prefixes and the instruction example; it still returned a duplicate. Namespace ambiguity is present, but prefix changes alone are insufficient. No invalid selections were repaired or accepted.
+
+The delegated candidate adds strict duplicate JSON-key rejection before parsing and a required, independently addressed judgement for each admitted candidate. Independent reviews pass key membership, reason/boolean/confidence checks, caps before confidence filtering, joint schema/input budgets, immutable record references and existing literal/source-fairness rules. The candidate suite passes 836 tests and 273 subtests, with one opt-in model test skipped.
+
+Actual native exact-incident retrieval then selected three distinct services with complete citations on a disposable copy of the preserved index. The cross-service question still failed `invalid_model_selection` with three admitted candidates. The underlying rejection category was not captured and remains a required bounded diagnostic. This is a partial correction, not a passing pilot. That proof consumed three query generations: one harness citation-key error, then the two measured queries. Failed artifacts remain preserved; the original index files are unchanged.
+
+## Compaction discards per-event measurement associations
+
+Independent prose review found that the selected web summary assigns HTTP 504 to repeated forbidden-directory-index observations. Exact preserved data shows one separate payment incident at 504 and 32 directory-index records at 200. Storage, metric counts and canonical digests are correct; the wrong association is already present in the durable model summary and is quoted in the answer.
+
+`_compact_request` previously supplied per-record refs/messages but only whole-section status counts, duration totals and first/last window timestamps. This removes the authoritative message-to-measurement association from model input. The reviewed correction restores each record's exact status, duration and timestamp in the transient model request, using the identical bounded request in preflight. Canonical storage, replay digests and embedding projection remain unchanged. Actual corrected prose must still be tested.
+
+A sampled auth summary also asserts “30 consecutive” events, although 24 source events intervene between its first and last grouped records. Its 1,527 ms summed work is distinct from the 53 ms observed span. Semantic grouping does not establish source adjacency. Instructions now prohibit that inference; tests and actual separated-run prose checks must preserve the distinction.
+
+Acceptance includes fresh actual mixed-status and separated-auth compaction checks, explicit unverified-summary labeling and exact selected-section status distribution beside readable metrics. Disclosure does not cure contradictory prose, and structural evidence selection cannot establish entailment. The fresh pilot and 100K release gates remain unchanged.
