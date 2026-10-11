@@ -10,7 +10,7 @@ One core: capture → related sections → compact summaries and selected fields
 ## Set up
 
 1. Work from the user's chosen application directory. Install this repository's Python package in an isolated environment if needed. macOS Python must support SQLite loadable extensions; Homebrew Python is a supported choice.
-2. Ask for or reuse an explicitly configured local Ollama endpoint. Inspect its `/api/tags` and `/api/show` capabilities. Help select an installed completion model supporting structured JSON, and a compatible embedding model and dimension. Never silently select a named model, download weights, change an existing vector index or send logs to a hosted provider.
+2. Read the [native compatibility contract](docs/native-token-counter-compatibility.md). The preserved native pipeline currently requires the exact reviewed macOS Ollama `0.34.4` bundle and approved `mistral:7b` / `nomic-embed-text:latest` assets, `/usr/bin/cc`, and Intel worker execution support (Rosetta on Apple silicon). Ask for or reuse an explicitly configured local Ollama endpoint and model profile. Inspect `/api/tags` and `/api/show`; metadata alone cannot approve unknown model or library bytes. Never silently select a named model, download weights, change an existing vector index or send logs to a hosted provider.
 3. Configure using the selected values:
 
    ```sh
