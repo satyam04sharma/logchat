@@ -4,7 +4,7 @@ Compact, searchable log memory for coding agents. Connect application logs to on
 
 ## Get started
 
-Python 3.12+ and a running local Ollama server are required. Logchat connects to your models; it does not bundle or download them.
+Python 3.12+ and a running local Ollama `0.34.4` server are required. Native generation uses a local GGUF completion model without stored message history; the [verified context guard](docs/qa/native-generation-context-guard.md) checks provider and model metadata before every generation. Logchat connects to your models; it does not bundle or download them.
 
 ```sh
 git clone https://github.com/satyam04sharma/logchat.git
