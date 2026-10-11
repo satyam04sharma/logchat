@@ -85,6 +85,31 @@ def reconcile(state, configs):
     db.close()
     return dict(passed=all(result['passed'] for result in results),sources=results)
 
+def context_quality(state, configs, label, answer, service=None):
+    """Score seeded incident support against durable IDs, not model confidence."""
+    evidence=answer.get('evidence',[])
+    if label in {'negative','empty environment','empty control project'}:
+        return dict(passed=not evidence,false_positive_memories=len(evidence),expected_empty=True)
+    expected_ids=set()
+    for config in configs:
+        if service and config['app']!=service:continue
+        expected_ids.update(f"{config['run_id']}-{config['app']}-{index:06d}" for index in [0,10000,20000,30000] if index<config['count'])
+    with sqlite3.connect(f'file:{state}/rag.db?mode=ro',uri=True) as db:
+        chunks=[json.loads(row[0]) for row in db.execute('SELECT payload FROM rag_chunks')]
+    relevant={chunk['chunk_id'] for chunk in chunks if any(record['event_id'] in expected_ids for record in json.loads(chunk['compact_evidence'])['records'])}
+    selected=[item['chunk_id'] for item in evidence]
+    hits=[identifier in relevant for identifier in selected]
+    precision=sum(hits)/len(hits) if hits else 0.0
+    recall=len(set(selected)&relevant)/len(relevant) if relevant else 0.0
+    expected_services={service} if service else {config['app'] for config in configs}
+    observed_services={item.get('service') for item in evidence}
+    source_coverage=len(expected_services&observed_services)/len(expected_services)
+    return dict(passed=bool(evidence) and precision==1 and source_coverage==1,
+        selected_memory_precision=precision,selected_memory_recall=recall,
+        reciprocal_rank=next((1/(index+1) for index,hit in enumerate(hits) if hit),0.0),
+        relevant_memories=len(relevant),selected_memories=len(selected),source_coverage=source_coverage,
+        interpretation='Seeded incident support only; bounded selection recall is reported, not a global RAGAS or entailment score')
+
 def main():
     p=argparse.ArgumentParser(); p.add_argument('--run-dir',required=True,type=Path); p.add_argument('--profile',required=True,type=Path); p.add_argument('--count',type=int,default=100000); p.add_argument('--minutes',type=float,default=90); p.add_argument('--smoke',type=int,default=48); p.add_argument('--batch',type=int,default=48); p.add_argument('--capture-burst',action='store_true'); p.add_argument('--drain-seconds',type=int,default=180); p.add_argument('--port',type=int,default=18960); a=p.parse_args()
     if not 3 <= a.count <= 100000 or not 1 <= a.batch <= 1000 or not 1 <= a.smoke <= a.count//3:
@@ -174,6 +199,9 @@ def main():
                     valid_scope=all(e['project_id']==query_pid and e['environment_id']==eid and (not service or e.get('service')==service) for e in evidence)
                     save(root/('query-'+label.replace(' ','-')+'.json'),answer)
                     results.append(dict(query=label,seconds=round(time.monotonic()-start,3),evidence_count=len(evidence),scope_valid=valid_scope,citations_valid=citations_valid,incident_found='INC_CORRELATION_73' in json.dumps(evidence),empty_expected=label in {'empty environment','negative','empty control project'},status='passed' if valid_scope and citations_valid and (label not in {'exact incident','worker scope','auth scope'} or 'INC_CORRELATION_73' in json.dumps(evidence)) and (label!='cross service incident' or {e.get('service') for e in evidence}=={'web','worker','auth'}) and (bool(evidence) if label not in {'empty environment','negative','empty control project'} else not evidence) else 'failed'))
+                    quality=context_quality(state,configs,label,answer,service)
+                    results[-1]['context_quality']=quality
+                    if not quality['passed']:results[-1]['status']='failed'
                 except Exception as error:results.append(dict(query=label,status='failed',error_category=type(error).__name__))
             duplicate=client.post(f'/projects/{pid}/events',json=dict(source_id=configs[0]['source_id'],events=smoke_events),headers={'Authorization':'Bearer '+configs[0]['token']}); replay=dict(status=duplicate.status_code,receipt=duplicate.json() if duplicate.status_code==200 else None)
             if a.capture_burst:
