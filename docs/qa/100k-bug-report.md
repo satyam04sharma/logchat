@@ -1,6 +1,6 @@
 # 100K pipeline bug report
 
-Current release status: **not ready to publish as a validated 100K demo**. Installed Chrome cycle 3 passed all 20 checks. Fresh three-application pilot cycle 2 captured and indexed all 1,200 events in 44 native memories, with exact canonical ledger reconciliation and restart/replay checks passing. However, its cross-service and exact-incident queries failed strict model-selection validation despite receiving all three relevant candidates. The pilot therefore failed acceptance. Exact response diagnosis, a reviewed correction, a passing fresh pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
+Current release status: **not ready to publish as a validated 100K demo**. Installed Chrome cycle 3 passed all 20 checks. Fresh three-application pilot cycle 2 captured and indexed all 1,200 events in 44 native memories, with exact canonical ledger reconciliation and restart/replay checks passing. However, its cross-service and exact-incident queries failed strict model-selection validation although the requests encoded all three relevant candidates. Subsequent provider logs confirm that those prompts were truncated before inference. The pilot therefore failed acceptance. Exact response diagnosis, a reviewed correction, a passing fresh pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
 
 | Finding | Current evidence/status |
 | --- | --- |
@@ -17,6 +17,7 @@ Current release status: **not ready to publish as a validated 100K demo**. Insta
 | Digest ledger only counted, not fully reconciled | QA corrected; all canonical values/scopes/job bindings checked and seven corruption probes rejected |
 | Actual multi-service model selection fails validation | Duplicate references confirmed; fixed-key contract passes structural review and exact-incident proof, but cross-service proof still fails validation |
 | Summary metric attribution and unsupported source adjacency | Confirmed prose-fidelity bugs; per-record input correction reviewed, actual corrected prose proof still outstanding |
+| Relevance prompts silently truncated by the native provider | Confirmed numeric server warnings correlate with failed and apparently successful probes; lossless input correction and full-fit proof required |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
@@ -181,3 +182,16 @@ That verified call invoked the original validator once. It returned three judgem
 The next delegated correction must remove or structurally prevent those contradictory combinations. It must preserve model-driven relevance, exact candidate membership, strict JSON-key rejection, confidence validation on every decision, selection caps before confidence filtering, citation/scope checks and the joint input/schema budgets. Invalid old responses cannot be repaired or promoted. Actual exact-incident and cross-service proofs, corrected fresh prose checks, a fresh pilot and the full 100K cycle remain required.
 
 At this point the GNHF/verified follow-up phase has consumed five query generation calls; the three earlier original/prefix diagnostics are additional. These counts include both harness failures. No fresh compaction proof attempts have yet been consumed. Original failed state and diagnostic artifacts remain unchanged.
+
+
+## Native relevance prompt truncation hides candidate evidence
+
+Independent correlation of content-free local Ollama server warnings with the actual probe windows confirms prompt truncation. The exact-incident recheck supplied 8,811 tokens, the cross-service and verified diagnostic supplied 8,839 tokens, and the later label-contract query supplied 8,815 tokens. Each warning reports a 4,099-token limit and truncation to that limit. Their completion timestamps and provider durations match the corresponding proof calls. The apparent exact-incident selection success therefore does not establish that all encoded evidence reached inference intact.
+
+The adapter requests `num_ctx=8192`; the model advertises a 32,768-token context and the running-model endpoint reports 8,192. These declarations do not override the observed truncation. Character/byte admission limits and a provider `prompt_eval_count` of 4,099 cannot establish full token fit. The request contains complete candidates, but the runner discards part of it before generating a schema-valid answer.
+
+This input-loss finding can undermine the model's relevance decisions. It does not prove that truncation alone caused every malformed reference or contradictory decision. The strict response-contract corrections remain independently useful, while their actual quality proof remains incomplete.
+
+The next correction must reduce the model-only relevance representation without losing typed source fields, event IDs, record bindings, timestamps, measurements or semantic-query records. Lossless columnar records and invariant metadata are candidate approaches. Durable compact records, canonical replay, vector recipe, scope/citation validation and selection limits remain unchanged. Revalidate actual exact, cross-service and semantic requests, with full-fit evidence rather than blind context/model/budget increases. Fresh compaction prose must also be checked for the same class of input loss.
+
+The final label-contract proof consumed one generation before its checker looked for confidence at the wrong response level; confidence belongs to row revalidation entries. It remains failed evidence. The model-contract phase now comprises six worker/verified query generations plus three earlier original/prefix diagnostics. No fresh compaction proof attempts have yet run. Query proof setup is being independently preflighted before further calls.
