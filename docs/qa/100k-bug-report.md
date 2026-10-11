@@ -23,6 +23,7 @@ Current release status: **not ready to publish as a validated 100K demo**. Histo
 | Joint relevance decisions omit an eligible source | Historical full-input exact lookup fails twice with auth rejected. Reviewed independent classification now passes actual exact/cross-service/semantic proofs; fresh-workload acceptance remains pending |
 | Source-backed facts escape a narrow query window | Reviewed per-cell correction passes independent reproduction and outside-ID zero-admission controls; fresh actual scoped proof pending |
 | Fresh installed source-observation compaction rejects actual batches | New blocking failure: console HTTP503 `compact_invalid_output`, auth development 0/2 indexed; exact validator diagnosis pending |
+| Valid preview context rejected before classification | New blocking failure: indexed preview memory has vector and lexical hits but fails the cosine admission gate; no classifier calls |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
@@ -347,3 +348,11 @@ Both release artifacts build and pass structure checks; all 75 installed runtime
 The fresh installed-wheel Chrome cycle on the independently reviewed source-backed/scoped candidate completed with 10 passing and 9 failing checks. Console capture returned HTTP503 with processing category `compact_invalid_output`. Auth development indexed 0 of 2 expected events; production indexed all 4 and preview indexed all 3. Subsequent missing-context and populated-reader checks also failed. These checks are recorded as failures, without treating all nine as independently diagnosed runtime bugs. The owned service stopped, with host capture disabled and no demo servers or containers started.
 
 The installed runtime/resource bytes match the reviewed candidate. The complete regression suite (1,241 tests and 363 subtests), 28 installed CLI contracts, package structure audit and UI contract controls passed; none override this actual failure. The run did not preserve parsed provider output, so `compact_invalid_output` alone cannot establish the exact rejected selector or validator reason. Independent offline diagnosis and a fresh instrumented native run are required. Release, the 100K go-ahead and GitHub merge remain blocked.
+
+## Indexed preview context fails the hybrid admission gate
+
+The same installed cycle independently indexed all three preview events, yet both saved preview API/browser queries returned no selected evidence. Provenance reports one vector hit, one lexical hit, one gate rejection and zero classifier calls. Offline reconstruction validates the retained chunk and scopes all three records correctly, with four source observations and thirteen retained fields. It finds no requested strong identifier or exact field-value anchor.
+
+The rejected condition is `retriever._rank`: without an exact identifier/field match, a candidate requires vector similarity at least 0.50 even when lexical retrieval found it. The actual score was not retained; rejection establishes that it was below this threshold, without supplying its numeric value. Controlled offline scores of 0.499999 and 0.50 reproduce rejection and admission respectively; shared literal eligibility passes with zero anchors. This is separate from the failed console/development compaction, and from relevance-model rejection.
+
+Acceptance: meaningful lexical source evidence may reach bounded candidate classification while preserving the cosine threshold, strict positive model validation, literal eligibility, scope and service fairness, and existing candidate/input/deadline caps. Boilerplate-only lexical matches, outside-window facts and absent identifiers must not manufacture admission. Verify the actual installed preview query again after a reviewed correction.
