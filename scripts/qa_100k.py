@@ -130,6 +130,15 @@ def valid_citations(answer, existing_ids):
         if citation.get('source_id')!=item['source_id'] or citation.get('window')!=item['window']:return False
     return all(f'[{identifier}]' in answer.get('answer','') for identifier in expected)
 
+def indexed_web_incident(state, config):
+    identifier=f"{config['run_id']}-web-000000"
+    with sqlite3.connect(f'file:{state}/rag.db?mode=ro',uri=True) as db:
+        for row in db.execute('SELECT payload FROM rag_chunks WHERE source_id=?',(config['source_id'],)):
+            chunk=json.loads(row[0])
+            if any(record['event_id']==identifier for record in json.loads(chunk['compact_evidence'])['records']):
+                return True
+    return False
+
 def main():
     p=argparse.ArgumentParser(); p.add_argument('--run-dir',required=True,type=Path); p.add_argument('--profile',required=True,type=Path); p.add_argument('--count',type=int,default=100000); p.add_argument('--minutes',type=float,default=90); p.add_argument('--smoke',type=int,default=48); p.add_argument('--batch',type=int,default=48); p.add_argument('--capture-burst',action='store_true'); p.add_argument('--drain-seconds',type=int,default=180); p.add_argument('--port',type=int,default=18960); a=p.parse_args()
     if not 3 <= a.count <= 100000 or not 1 <= a.batch <= 1000 or not 1 <= a.smoke <= a.count//3:
@@ -194,11 +203,27 @@ def main():
                 try:c.wait(timeout=10)
                 except subprocess.TimeoutExpired:c.kill(); c.wait()
             drain=time.time()+a.drain_seconds
+            concurrent_query=None
             while time.time()<drain:
                 snapshot=counts(state)
                 if a.capture_burst:
                     capture_status=request('GET',f'/projects/{pid}/status')['rag']['capture']
                     save(root/'capture-drain-progress.json',dict(counts=snapshot,capture=capture_status,observed_unix=time.time(),seconds_since_first_admission=round(time.time()-capture_status['oldest_captured_at'],3) if capture_status['oldest_captured_at'] else None))
+                    if concurrent_query is None and snapshot['indexed_events'] and capture_status['pending_events'] and not capture_status['pending_failed_events'] and indexed_web_incident(state,configs[0]):
+                        started=time.monotonic()
+                        body=dict(question='INC_CORRELATION_73',service='web',environment_ids=[prod],timezone='UTC',start=(datetime.fromisoformat(timestamp)-timedelta(seconds=2)).isoformat(),end=(datetime.fromisoformat(timestamp)+timedelta(seconds=3)).isoformat())
+                        try:
+                            answer=request('POST',f'/projects/{pid}/ask',body)
+                            evidence=answer.get('evidence',[])
+                            with sqlite3.connect(f'file:{state}/rag.db?mode=ro',uri=True) as db:
+                                existing_ids={row[0] for row in db.execute('SELECT chunk_id FROM rag_chunks')}
+                            quality=context_quality(state,configs,'concurrent incident',answer,'web')
+                            scope_valid=all(e['project_id']==pid and e['environment_id']==prod and e.get('service')=='web' for e in evidence)
+                            concurrent_query=dict(passed=quality['passed'] and scope_valid and valid_citations(answer,existing_ids),seconds=round(time.monotonic()-started,3),pending_at_start=capture_status['pending_events'],indexed_at_start=snapshot['indexed_events'],context_quality=quality,scope_valid=scope_valid)
+                            save(root/'query-during-drain.json',answer)
+                        except Exception as error:
+                            concurrent_query=dict(passed=False,error_category=type(error).__name__,pending_at_start=capture_status['pending_events'],indexed_at_start=snapshot['indexed_events'])
+                        save(root/'concurrent-query-check.json',concurrent_query)
                     if snapshot['indexed_events']==a.count and not capture_status['pending_events'] and not any(k!='completed' for k in snapshot['jobs']):break
                     if capture_status['pending_failed_events']:break
                 elif not any(k!='completed' for k in snapshot['jobs']):break
@@ -257,12 +282,17 @@ def main():
             final['rag_complete']=final['complete'] and snapshot['native_index_complete']
             final['generation_complete']=final['generated_unique_events']==a.count
             final['retrieval_evaluation_complete']=bool(results) and all(q['status']=='passed' for q in results)
+            if a.capture_burst and concurrent_query is None:
+                concurrent_query=dict(passed=False,status='not_observed',reason='No indexed web incident was observed while captured work remained pending')
+                save(root/'concurrent-query-check.json',concurrent_query)
+            final['concurrent_query_check']=concurrent_query
+            final['concurrent_query_verified']=not a.capture_burst or bool(concurrent_query and concurrent_query['passed'])
             final['exact_corpus_accounting']=reconcile(state,configs)
             final['restart_verified']=restart_result['passed']
             final['source_auth_isolation']=wrong_token.status_code==401
             final['replay_verified']=replay['status']==200 and replay['receipt']['deduplicated']==a.smoke
             final['no_pending_or_failed_work']=not capture['pending_events'] and not capture['pending_failed_events'] and not any(k!='completed' for k in snapshot['jobs'])
-            final['acceptance_passed']=all(final[key] for key in ['admission_complete','rag_complete','generation_complete','retrieval_evaluation_complete','restart_verified','source_auth_isolation','replay_verified','no_pending_or_failed_work']) and final['exact_corpus_accounting']['passed']
+            final['acceptance_passed']=all(final[key] for key in ['admission_complete','rag_complete','generation_complete','retrieval_evaluation_complete','concurrent_query_verified','restart_verified','source_auth_isolation','replay_verified','no_pending_or_failed_work']) and final['exact_corpus_accounting']['passed']
             save(root/'report.json',final); print(json.dumps(dict(complete=final['complete'],counts=snapshot)),flush=True)
             return 0 if final['acceptance_passed'] else 2
     except Exception as error:
