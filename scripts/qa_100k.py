@@ -139,6 +139,12 @@ def indexed_web_incident(state, config):
                 return True
     return False
 
+def start_owned_server(state, root, port, env):
+    # Enable only the runtime's content-free stage diagnostics, not HTTP bodies
+    # or general debug logging. The same native module and arguments still run.
+    bootstrap="import logging,runpy,sys; logger=logging.getLogger('logchat.local.rag_runtime'); handler=logging.FileHandler(sys.argv.pop(1)); handler.setFormatter(logging.Formatter('%(message)s')); logger.addHandler(handler); logger.setLevel(logging.INFO); logger.propagate=False; runpy.run_module('logchat.local.server',run_name='__main__')"
+    return subprocess.Popen([sys.executable,'-c',bootstrap,str(root/'stage-timings.log'),'--state-dir',str(state),'--port',str(port)],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+
 def main():
     p=argparse.ArgumentParser(); p.add_argument('--run-dir',required=True,type=Path); p.add_argument('--profile',required=True,type=Path); p.add_argument('--count',type=int,default=100000); p.add_argument('--minutes',type=float,default=90); p.add_argument('--smoke',type=int,default=48); p.add_argument('--batch',type=int,default=48); p.add_argument('--capture-burst',action='store_true'); p.add_argument('--drain-seconds',type=int,default=180); p.add_argument('--port',type=int,default=18960); a=p.parse_args()
     if not 3 <= a.count <= 100000 or not 1 <= a.batch <= 1000 or not 1 <= a.smoke <= a.count//3:
@@ -151,7 +157,7 @@ def main():
     from logchat.local.rag_runtime import configure
     asyncio.run(configure(state,base_url=profile['base_url'],model=profile['embedding']['model'],dimensions=profile['embedding']['dimensions'],chat_model=profile['generation_model'],content_policy=profile['content_policy']))
     env=dict(os.environ,PYTHONPATH=str(ROOT/'src'),LOGCHAT_CAPTURE_HOST='0',LOGCHAT_LOCAL_DIR=str(state),LOGCHAT_SECRETS_DIR=str(root/'credentials'))
-    server=subprocess.Popen([sys.executable,'-m','logchat.local.server','--state-dir',str(state),'--port',str(a.port)],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    server=start_owned_server(state,root,a.port,env)
     import logchat, pipeline.models
     save(root/'runtime-provenance.json',dict(harness_root=str(ROOT),harness_cwd=os.getcwd(),logchat_module=logchat.__file__,pipeline_models_module=pipeline.models.__file__,server_cwd=str(ROOT),explicit_pythonpath=str(ROOT/'src')))
     save(root/'processes.json',dict(server_pid=server.pid,producer_pids=[],port=a.port,loopback=True,host_capture=False))
@@ -183,7 +189,7 @@ def main():
             from importlib.util import spec_from_file_location,module_from_spec
             spec=spec_from_file_location('producer',ROOT/'examples/loadtest/producer.py'); module=module_from_spec(spec); spec.loader.exec_module(module)
             # Smoke uses the same exact workload events; producer replay will deduplicate these.
-            start=time.monotonic(); smoke_events=[module.event(configs[0],i) for i in range(a.smoke)]
+            start=time.monotonic(); admission_started=start; smoke_events=[module.event(configs[0],i) for i in range(a.smoke)]
             r=client.post(f'/projects/{pid}/events',json=dict(source_id=configs[0]['source_id'],events=smoke_events),headers={'Authorization':'Bearer '+configs[0]['token']})
             smoke=dict(status=r.status_code,elapsed_seconds=round(time.monotonic()-start,3),category=r.headers.get('X-Logchat-Processing-Category'),phase=r.headers.get('X-Logchat-Processing-Phase'),events=a.smoke,mode='temporary_original_admission' if a.capture_burst else 'native_compact_semantic')
             if r.status_code==200:smoke['receipt']=r.json()
@@ -228,6 +234,7 @@ def main():
                     if capture_status['pending_failed_events']:break
                 elif not any(k!='completed' for k in snapshot['jobs']):break
                 time.sleep(2)
+            index_elapsed_seconds=round(time.monotonic()-admission_started,3) if snapshot['indexed_events']==a.count and snapshot['native_index_complete'] else None
             results=[]
             queries=[('cross service incident','What context exists for INC_CORRELATION_73 across web, worker, and auth services?',prod,None),('exact incident','INC_CORRELATION_73',prod,None),('semantic paraphrase','Which services saw payment requests fail because a gateway did not respond?',prod,'web'),('worker scope','INC_CORRELATION_73',prod,'worker'),('auth scope','INC_CORRELATION_73',prod,'auth'),('empty environment','INC_CORRELATION_73',preview,None),('negative','QUANTUM_NONEXISTENT_92731',prod,None)]
             for config in configs:
@@ -259,7 +266,7 @@ def main():
             server.terminate(); server.wait(timeout=20)
             stopped_counts=CaptureSpool(state).status(pid)
             stopped_index=counts(state)
-            server=subprocess.Popen([sys.executable,'-m','logchat.local.server','--state-dir',str(state),'--port',str(a.port)],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            server=start_owned_server(state,root,a.port,env)
             for attempt in range(120):
                 try:
                     if client.get('/health/ready').status_code==200:break
@@ -286,6 +293,8 @@ def main():
                 concurrent_query=dict(passed=False,status='not_observed',reason='No indexed web incident was observed while captured work remained pending')
                 save(root/'concurrent-query-check.json',concurrent_query)
             final['concurrent_query_check']=concurrent_query
+            final['native_indexing_seconds']=index_elapsed_seconds
+            final['timing_interpretation']='Index timing is an observed upper bound from first smoke submission, including polling and the pending-drain query; validation timing includes checks before final reporting and excludes owned-process cleanup.'
             final['concurrent_query_verified']=not a.capture_burst or bool(concurrent_query and concurrent_query['passed'])
             final['exact_corpus_accounting']=reconcile(state,configs)
             final['restart_verified']=restart_result['passed']
@@ -293,6 +302,7 @@ def main():
             final['replay_verified']=replay['status']==200 and replay['receipt']['deduplicated']==a.smoke
             final['no_pending_or_failed_work']=not capture['pending_events'] and not capture['pending_failed_events'] and not any(k!='completed' for k in snapshot['jobs'])
             final['acceptance_passed']=all(final[key] for key in ['admission_complete','rag_complete','generation_complete','retrieval_evaluation_complete','concurrent_query_verified','restart_verified','source_auth_isolation','replay_verified','no_pending_or_failed_work']) and final['exact_corpus_accounting']['passed']
+            final['validation_elapsed_seconds']=round(time.monotonic()-admission_started,3)
             save(root/'report.json',final); print(json.dumps(dict(complete=final['complete'],counts=snapshot)),flush=True)
             return 0 if final['acceptance_passed'] else 2
     except Exception as error:
