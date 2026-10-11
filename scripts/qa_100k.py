@@ -51,8 +51,43 @@ def counts(state):
     connection.close()
     return dict(indexed_events=events,chunks=len(chunks),vectors=vectors,event_keys=keys,event_digests=digests,jobs=jobs,versions=dict(Counter(c['compression_version'] for c in chunks)),models=dict(Counter(c['summary_model'] for c in chunks)))
 
+def reconcile(state, configs):
+    """Verify source metrics and exact IDs independently of query/model selection."""
+    from logchat.rag.builder import event_key
+    from logchat.rag.contracts import SourceIdentity
+    from logchat.rag.scheduler import _identity_key
+    db=sqlite3.connect(f'file:{state}/rag.db?mode=ro',uri=True)
+    db.row_factory=sqlite3.Row
+    results=[]
+    for config in configs:
+        rows=db.execute('SELECT payload FROM rag_chunks WHERE source_id=?',(config['source_id'],)).fetchall()
+        values=[json.loads(row['payload']) for row in rows]
+        duration=sum(chunk['metrics']['duration_sum_ms'] for chunk in values)
+        statuses=Counter()
+        for chunk in values:statuses.update(chunk['metrics']['status_counts'])
+        size=config['count']; incidents={i for i in [0,10000,20000,30000] if i<size}
+        expected_duration=sum(5000 if i in incidents else 10+i%90 for i in range(size))
+        expected_statuses={'200':size-len(incidents),'504':len(incidents)}
+        expected_ids={f"{config['run_id']}-{config['app']}-{i:06d}" for i in range(size)}
+        metadata=[]
+        for chunk in values:
+            evidence=json.loads(chunk['compact_evidence'])
+            metadata.extend(evidence['records'])
+        observed_ids={record['event_id'] for record in metadata}
+        identity=SourceIdentity('local-os-user',config['project_id'],config['environment_id'],config['source_id'])
+        keys={event_key(identity,identifier) for identifier in expected_ids}
+        observed_keys={row[0] for row in db.execute('SELECT event_key FROM rag_schedule_event_keys WHERE scope=?',(_identity_key(identity),))}
+        scope_valid=all(chunk['identity']==dict(owner_id=identity.owner_id,project_id=identity.project_id,environment_id=identity.environment_id,source_id=identity.source_id) for chunk in values)
+        result=dict(app=config['app'],expected_events=size,indexed_events=sum(c['metrics']['event_count'] for c in values),metadata_records=len(metadata),unique_metadata_ids=len(observed_ids),missing_ids=len(expected_ids-observed_ids),unexpected_ids=len(observed_ids-expected_ids),scope_valid=scope_valid,event_keys_match=bool(keys) and keys==observed_keys,duration_sum_ms=duration,expected_duration_sum_ms=expected_duration,status_counts=dict(statuses),expected_status_counts=expected_statuses)
+        result['passed']=result['indexed_events']==size and len(metadata)==size and observed_ids==expected_ids and result['event_keys_match'] and scope_valid and duration==expected_duration and dict(statuses)==expected_statuses
+        results.append(result)
+    db.close()
+    return dict(passed=all(result['passed'] for result in results),sources=results)
+
 def main():
-    p=argparse.ArgumentParser(); p.add_argument('--run-dir',required=True,type=Path); p.add_argument('--profile',required=True,type=Path); p.add_argument('--count',type=int,default=100000); p.add_argument('--minutes',type=float,default=90); p.add_argument('--smoke',type=int,default=48); p.add_argument('--batch',type=int,default=48); p.add_argument('--capture-burst',action='store_true'); p.add_argument('--drain-seconds',type=int,default=180); a=p.parse_args()
+    p=argparse.ArgumentParser(); p.add_argument('--run-dir',required=True,type=Path); p.add_argument('--profile',required=True,type=Path); p.add_argument('--count',type=int,default=100000); p.add_argument('--minutes',type=float,default=90); p.add_argument('--smoke',type=int,default=48); p.add_argument('--batch',type=int,default=48); p.add_argument('--capture-burst',action='store_true'); p.add_argument('--drain-seconds',type=int,default=180); p.add_argument('--port',type=int,default=18960); a=p.parse_args()
+    if not 3 <= a.count <= 100000 or not 1 <= a.batch <= 1000 or not 1 <= a.smoke <= a.count//3:
+        raise ValueError('choose_bounded_count_batch_and_smoke')
     root=a.run_dir.resolve(); root.mkdir(parents=True,exist_ok=True,mode=0o700); state=root/'state'; state.mkdir(mode=0o700)
     if (state/'local.db').exists():raise RuntimeError('fresh_state_required')
     import psutil
@@ -61,13 +96,13 @@ def main():
     from logchat.local.rag_runtime import configure
     asyncio.run(configure(state,base_url=profile['base_url'],model=profile['embedding']['model'],dimensions=profile['embedding']['dimensions'],chat_model=profile['generation_model'],content_policy=profile['content_policy']))
     env=dict(os.environ,PYTHONPATH=str(ROOT/'src'),LOGCHAT_CAPTURE_HOST='0',LOGCHAT_LOCAL_DIR=str(state),LOGCHAT_SECRETS_DIR=str(root/'credentials'))
-    server=subprocess.Popen([sys.executable,'-m','logchat.local.server','--state-dir',str(state),'--port','18960'],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    server=subprocess.Popen([sys.executable,'-m','logchat.local.server','--state-dir',str(state),'--port',str(a.port)],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     import logchat, pipeline.models
     save(root/'runtime-provenance.json',dict(harness_root=str(ROOT),harness_cwd=os.getcwd(),logchat_module=logchat.__file__,pipeline_models_module=pipeline.models.__file__,server_cwd=str(ROOT),explicit_pythonpath=str(ROOT/'src')))
-    save(root/'processes.json',dict(server_pid=server.pid,producer_pids=[],port=18960,loopback=True,host_capture=False))
+    save(root/'processes.json',dict(server_pid=server.pid,producer_pids=[],port=a.port,loopback=True,host_capture=False))
     deadline=time.time()+a.minutes*60; run_id=uuid.uuid4().hex[:8]; timestamp=datetime.now(timezone.utc).replace(microsecond=0).isoformat(); configs=[]; producers=[]
     try:
-        with httpx.Client(base_url='http://127.0.0.1:18960',trust_env=False,timeout=330) as client:
+        with httpx.Client(base_url=f'http://127.0.0.1:{a.port}',trust_env=False,timeout=330) as client:
             for _ in range(120):
                 try:
                     if client.get('/health/ready').status_code==200:break
@@ -86,10 +121,10 @@ def main():
             envs=request('GET',f'/projects/{pid}/environments'); prod=next(e['id'] for e in envs if e['name']=='prod'); preview=next(e['id'] for e in envs if e['name']=='preview')
             for number,(app,dataset) in enumerate([('web','Apache'),('worker','Linux'),('auth','OpenSSH')]):
                 source=request('POST',f'/projects/{pid}/sources',dict(name=app+' simulator',environment='prod',kind='push'))
-                configs.append(dict(app=app,dataset=dataset,templates=templates[dataset],project_id=pid,source_id=source['id'],token=source['token'],url=str(client.base_url).rstrip('/'),evidence=str(root),run_id=run_id,timestamp=timestamp,deadline=deadline,batch=a.batch,count=a.count//3+(number<a.count%3)))
+                configs.append(dict(app=app,dataset=dataset,templates=templates[dataset],project_id=pid,environment_id=prod,source_id=source['id'],token=source['token'],url=str(client.base_url).rstrip('/'),evidence=str(root),run_id=run_id,timestamp=timestamp,deadline=deadline,batch=a.batch,count=a.count//3+(number<a.count%3)))
             wrong_token=client.post(f'/projects/{pid}/events',json=dict(source_id=configs[1]['source_id'],events=[dict(message='Synthetic wrong-source scope check',event_id='isolation-probe')]),headers={'Authorization':'Bearer '+configs[0]['token']})
             save(root/'source-token-isolation.json',dict(status=wrong_token.status_code,passed=wrong_token.status_code==401))
-            save(root/'bindings-public.json',dict(project_id=pid,other_project_id=other['id'],environment_id=prod,preview_environment_id=preview,sources=[{k:c[k] for k in ['app','source_id','dataset','count']} for c in configs]))
+            save(root/'bindings-public.json',dict(run_id=run_id,timestamp=timestamp,project_id=pid,other_project_id=other['id'],environment_id=prod,preview_environment_id=preview,sources=[{k:c[k] for k in ['app','source_id','dataset','count']} for c in configs]))
             from importlib.util import spec_from_file_location,module_from_spec
             spec=spec_from_file_location('producer',ROOT/'examples/loadtest/producer.py'); module=module_from_spec(spec); spec.loader.exec_module(module)
             # Smoke uses the same exact workload events; producer replay will deduplicate these.
@@ -104,7 +139,7 @@ def main():
             for config in configs:
                 child=subprocess.Popen([sys.executable,str(ROOT/'examples/loadtest/producer.py')],cwd=ROOT,env=env,stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,text=True)
                 child.stdin.write(json.dumps(config)+'\n'); child.stdin.close(); producers.append(child)
-            save(root/'processes.json',dict(server_pid=server.pid,producer_pids=[c.pid for c in producers],port=18960,loopback=True,host_capture=False))
+            save(root/'processes.json',dict(server_pid=server.pid,producer_pids=[c.pid for c in producers],port=a.port,loopback=True,host_capture=False))
             while any(c.poll() is None for c in producers) and time.time()<deadline:
                 snapshot=counts(state); save(root/'index-progress.json',snapshot); print(json.dumps(snapshot),flush=True); time.sleep(30)
             for c in producers:
@@ -118,14 +153,15 @@ def main():
                 if a.capture_burst:
                     capture_status=request('GET',f'/projects/{pid}/status')['rag']['capture']
                     save(root/'capture-drain-progress.json',dict(counts=snapshot,capture=capture_status,observed_unix=time.time(),seconds_since_first_admission=round(time.time()-capture_status['oldest_captured_at'],3) if capture_status['oldest_captured_at'] else None))
-                    if capture_status['failed_attempts'] or not capture_status['pending_events']:break
+                    if snapshot['indexed_events']==a.count and not capture_status['pending_events'] and not any(k!='completed' for k in snapshot['jobs']):break
+                    if capture_status['pending_failed_events']:break
                 elif not any(k!='completed' for k in snapshot['jobs']):break
                 time.sleep(2)
             results=[]
-            queries=[('exact incident','INC_CORRELATION_73',prod,None),('semantic paraphrase','Which services saw payment requests fail because a gateway did not respond?',prod,'web'),('worker scope','INC_CORRELATION_73',prod,'worker'),('auth scope','INC_CORRELATION_73',prod,'auth'),('empty environment','INC_CORRELATION_73',preview,None),('negative','QUANTUM_NONEXISTENT_92731',prod,None)]
+            queries=[('cross service incident','What context exists for INC_CORRELATION_73 across web, worker, and auth services?',prod,None),('exact incident','INC_CORRELATION_73',prod,None),('semantic paraphrase','Which services saw payment requests fail because a gateway did not respond?',prod,'web'),('worker scope','INC_CORRELATION_73',prod,'worker'),('auth scope','INC_CORRELATION_73',prod,'auth'),('empty environment','INC_CORRELATION_73',preview,None),('negative','QUANTUM_NONEXISTENT_92731',prod,None)]
             other_env=request('GET',f"/projects/{other['id']}/environments")[0]['id']
             queries.append(('empty control project','INC_CORRELATION_73',other_env,None))
-            if a.capture_burst:queries=[]
+            if a.capture_burst and counts(state)['indexed_events']!=a.count:queries=[]
             for label,question,eid,service in queries:
                 start=time.monotonic(); body=dict(question=question,environment_ids=[eid],timezone='UTC',start=(datetime.fromisoformat(timestamp)-timedelta(seconds=2)).isoformat(),end=(datetime.fromisoformat(timestamp)+timedelta(seconds=3)).isoformat())
                 if service:body['service']=service
@@ -136,7 +172,7 @@ def main():
                     citations_valid=all(c['id'] in existing_ids and c['id'] in {e['id'] for e in evidence} for c in answer.get('citations',[])) and set(answer.get('cited_evidence_ids',[]))=={e['id'] for e in evidence} and (not evidence or bool(answer.get('citations'))) 
                     valid_scope=all(e['project_id']==query_pid and e['environment_id']==eid and (not service or e.get('service')==service) for e in evidence)
                     save(root/('query-'+label.replace(' ','-')+'.json'),answer)
-                    results.append(dict(query=label,seconds=round(time.monotonic()-start,3),evidence_count=len(evidence),scope_valid=valid_scope,citations_valid=citations_valid,incident_found='INC_CORRELATION_73' in json.dumps(evidence),empty_expected=label in {'empty environment','negative','empty control project'},status='passed' if valid_scope and citations_valid and (label not in {'exact incident','worker scope','auth scope'} or 'INC_CORRELATION_73' in json.dumps(evidence)) and (bool(evidence) if label not in {'empty environment','negative','empty control project'} else not evidence) else 'failed'))
+                    results.append(dict(query=label,seconds=round(time.monotonic()-start,3),evidence_count=len(evidence),scope_valid=valid_scope,citations_valid=citations_valid,incident_found='INC_CORRELATION_73' in json.dumps(evidence),empty_expected=label in {'empty environment','negative','empty control project'},status='passed' if valid_scope and citations_valid and (label not in {'exact incident','worker scope','auth scope'} or 'INC_CORRELATION_73' in json.dumps(evidence)) and (label!='cross service incident' or {e.get('service') for e in evidence}=={'web','worker','auth'}) and (bool(evidence) if label not in {'empty environment','negative','empty control project'} else not evidence) else 'failed'))
                 except Exception as error:results.append(dict(query=label,status='failed',error_category=type(error).__name__))
             duplicate=client.post(f'/projects/{pid}/events',json=dict(source_id=configs[0]['source_id'],events=smoke_events),headers={'Authorization':'Bearer '+configs[0]['token']}); replay=dict(status=duplicate.status_code,receipt=duplicate.json() if duplicate.status_code==200 else None)
             if a.capture_burst:
@@ -144,7 +180,7 @@ def main():
                 before_restart=CaptureSpool(state).status(pid)
                 server.terminate(); server.wait(timeout=20)
                 stopped_counts=CaptureSpool(state).status(pid)
-                server=subprocess.Popen([sys.executable,'-m','logchat.local.server','--state-dir',str(state),'--port','18960'],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                server=subprocess.Popen([sys.executable,'-m','logchat.local.server','--state-dir',str(state),'--port',str(a.port)],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                 for attempt in range(120):
                     try:
                         if client.get('/health/ready').status_code==200:break
@@ -154,16 +190,22 @@ def main():
                 replay_response=client.post(f'/projects/{pid}/events',json=dict(source_id=configs[0]['source_id'],events=smoke_events),headers={'Authorization':'Bearer '+configs[0]['token']})
                 after_replay=request('GET',f'/projects/{pid}/status')['rag']['capture']
                 save(root/'restart-durability.json',dict(before=before_restart,stopped=stopped_counts,after=after_restart,after_replay=after_replay,replay_status=replay_response.status_code,replay_receipt=replay_response.json() if replay_response.status_code==200 else None,accepted_stable=all(x['accepted_events']==a.count for x in [before_restart,stopped_counts,after_restart,after_replay]),accounting_valid=after_replay['pending_events']+after_replay['completed_events']+after_replay['expired_events']==a.count,no_drops=after_replay['dropped_events']==0))
-                save(root/'processes.json',dict(server_pid=server.pid,producer_pids=[c.pid for c in producers],port=18960,loopback=True,host_capture=False,restart_verified=True))
+                save(root/'processes.json',dict(server_pid=server.pid,producer_pids=[c.pid for c in producers],port=a.port,loopback=True,host_capture=False,restart_verified=True))
             progress=[json.loads((root/(c['app']+'-progress.json')).read_text()) for c in configs]
             snapshot=counts(state); final=dict(target=a.count,counts=snapshot,accepted=sum(p['accepted'] for p in progress),deduplicated=sum(p['deduplicated'] for p in progress),generated_unique_events=sum(p['generated'] for p in progress),acknowledged_new_producer_events=sum(p['accepted']-p['deduplicated'] for p in progress),smoke_acknowledged_events=a.smoke,complete=snapshot['indexed_events']==a.count,smoke=smoke,queries=results,duplicate_replay=replay,producer_results=progress,test_mode='temporary_original_admission_burst' if a.capture_burst else 'native_compact_semantic',runtime_status=request('GET',f'/projects/{pid}/status'),limitations=['Frequency-weighted sanitized Loghub EventTemplate replication; 6000 original samples inspected, not 100000 source-unique logs','Single machine loopback deployment','No remote or production deployment','Query evidence is selected subset; exact corpus totals independently read from durable native database'])
             capture=final['runtime_status']['rag']['capture']
             final['admission_complete']=capture['accepted_events']==a.count if a.capture_burst else final['accepted']==a.count
             final['rag_complete']=final['complete']
             final['generation_complete']=final['generated_unique_events']==a.count
-            final['retrieval_evaluation_complete']=not a.capture_burst and all(q['status']=='passed' for q in results)
+            final['retrieval_evaluation_complete']=bool(results) and all(q['status']=='passed' for q in results)
+            final['exact_corpus_accounting']=reconcile(state,configs)
+            final['restart_verified']=not a.capture_burst or all(json.loads((root/'restart-durability.json').read_text())[key] for key in ['accepted_stable','accounting_valid','no_drops'])
+            final['source_auth_isolation']=wrong_token.status_code==401
+            final['replay_verified']=replay['status']==200 and replay['receipt']['deduplicated']==a.smoke
+            final['no_pending_or_failed_work']=not capture['pending_events'] and not capture['pending_failed_events'] and not any(k!='completed' for k in snapshot['jobs'])
+            final['acceptance_passed']=all(final[key] for key in ['admission_complete','rag_complete','generation_complete','retrieval_evaluation_complete','restart_verified','source_auth_isolation','replay_verified','no_pending_or_failed_work']) and final['exact_corpus_accounting']['passed']
             save(root/'report.json',final); print(json.dumps(dict(complete=final['complete'],counts=snapshot)),flush=True)
-            return 0 if final['rag_complete'] and final['retrieval_evaluation_complete'] else 2
+            return 0 if final['acceptance_passed'] else 2
     except Exception as error:
         save(root/'failure.json',dict(error_category=type(error).__name__,counts=counts(state) if (state/'rag.db').exists() else None)); raise
     finally:
