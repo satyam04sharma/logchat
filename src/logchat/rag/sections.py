@@ -1177,7 +1177,7 @@ def _compact_feasible(chunk, records, config, messages=None, *, source_catalog=N
 
 def _pack_compact_sections(batch, config, messages=None, *, source_catalog=None,
                            protected_bodies=None):
-    """Split only model-selected sections; preflight all singles before generation."""
+    """Split model-selected sections under character and evidence reservations."""
     output = []
     for chunk in batch.chunks:
         records = records_for_chunk(chunk)
@@ -1215,7 +1215,8 @@ async def _pack_compact_physical(batch, local_model, config, messages=None, **ca
 
     Character/evidence bounds still apply. Exact checks use a call-local cache
     of complete requests, followed by deterministic bisection of selected
-    memberships. Every singleton is checked even when its parent fits.
+    memberships. Prove every final physical request, including singletons
+    reached by splitting; unused logical subsets need no token proof.
     """
     from pipeline.model_transport import generation_body
     from pipeline.token_budget import request_digest
@@ -1253,14 +1254,9 @@ async def _pack_compact_physical(batch, local_model, config, messages=None, **ca
         child = make_chunk(batch.batch_id, batch.identity, chunk.window, rows, SECTION_VERSION)
         return replace(child, loss_notes=chunk.loss_notes)
 
-    # This pass is deliberately independent of parent admission: tokenizers
-    # need not be monotone after local refs/catalogs/schema have been rebuilt.
-    for chunk in packed.chunks:
-        for row in records_for_chunk(chunk):
-            if not await fits(subset(chunk, [row])):
-                raise SectionModelError("compact_token_singleton_exceeded", "compact_summary")
-
     async def split(chunk):
+        # A fitting parent is the physical request we will send. After a split,
+        # independently check both rebuilt children: no monotonicity is assumed.
         if await fits(chunk):
             return [chunk]
         rows = records_for_chunk(chunk)

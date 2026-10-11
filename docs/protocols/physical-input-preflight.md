@@ -47,14 +47,20 @@ a production adapter is not an implementation of this contract.
 ## Planning
 
 Compaction first applies its existing character/evidence packing. It then checks
-every singleton, including those inside a fitting parent. Any impossible singleton
-or unavailable proof aborts before any compaction generation. Oversized parents
+each resulting parent. A fitting parent is retained without checking hypothetical
+subsets that will never be sent. Any impossible physical singleton or unavailable
+proof aborts before any compaction generation, even after earlier branches fit.
+Oversized parents
 split by ordered record membership at the midpoint, rebuilding local refs,
 fields, catalogs and schema for each child. Token counts are not assumed monotone.
 The final batch must pass refinement validation and complete-request admission.
-A call-local request-hash cache avoids recounting identical requests. At most
-three times the retained record count distinct physical candidates are counted;
-there are no generation probes. Original source, notes, measurements, windows,
+A call-local request-hash cache avoids recounting identical requests. For N records
+in P character-packed parents, at most 2N-P distinct physical candidates are
+counted (the nodes of P binary split trees). Fitting parents require one count
+each, with no singleton sweep. Both children of every split are checked independently;
+no parent or sibling count proves a child's fit. This bounds candidate count,
+not wall time or native token counts. There are no generation probes.
+Original source, notes, measurements, windows,
 key coverage and refinement identities remain subject to existing validators.
 
 All preflight awaits remain inside the existing 300-second intake timeout;
@@ -83,3 +89,23 @@ No source/provider/prompt bodies are logged or written by the test.
 
 Native child-token proof, actual embedding fit and vectors, independent review,
 fresh intake/source-oracle/browser/full-scale checks and remote CI remain open.
+
+## Unresolved production capability
+
+The available QA design combines a version-specific debug render request with
+process discovery of a private runner tokenizer endpoint. Its render request can
+schedule a runner, and its per-request metadata and discovery calls do not meet
+the portable, initialized-once adapter contract above. Copying it into production
+would not establish a supported deployment binding or a bounded planning latency.
+No production construction path currently supplies the counter. This checkpoint
+therefore remains unsuitable for native compact intake until a verified adapter
+is implemented and wired through application model construction.
+
+Embedding also needs its own digest-bound complete prefixed-input tokenizer and
+effective-context proof, including special tokens. A reported training context
+length is insufficient. A preserving refinement implementation must establish
+whether historical-recipe singletons fit before choosing between subset refinement
+and a new lossless versioned fact-table transport. Neither splitting a provider
+batch nor removing repeated facts without durable version binding resolves this
+prerequisite. Existing embedding bytes, identities and failed-job fences remain
+unchanged; no embedding correction or actual acceptance is claimed here.

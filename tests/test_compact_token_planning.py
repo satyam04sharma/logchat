@@ -106,7 +106,7 @@ class SizedModel(CompactModel):
 
 
 @pytest.mark.asyncio
-async def test_plan_checks_all_singles_and_final_requests_preserving_exact_records():
+async def test_plan_checks_final_requests_preserving_exact_records():
     source, views, options = await fixture(['operation completed after delay'] * 7)
     model = SizedModel()
     packed = await _pack_compact_physical(source, model, SummaryConfig(), views, **options)
@@ -114,9 +114,10 @@ async def test_plan_checks_all_singles_and_final_requests_preserving_exact_recor
     retained = [r for c in packed.chunks for r in records_for_chunk(c)]
     assert retained == original
     assert [len(records_for_chunk(c)) for c in packed.chunks] == [1, 2, 2, 2]
-    assert model.checked[:7] == [(r['timestamp'],) for r in original]
+    assert [len(keys) for keys in model.checked] == [7, 3, 1, 2, 4, 2, 2]
     assert all(tuple(r['timestamp'] for r in records_for_chunk(c)) in model.checked for c in packed.chunks)
-    assert len(model.checked) <= 3 * len(original)
+    assert len(model.checked) == len(set(model.checked))
+    assert len(model.checked) <= 2 * len(original) - len(source.chunks)
     assert all(c.loss_notes == source.chunks[0].loss_notes for c in packed.chunks)
     validate_refinement(source, packed)
     compact = await compact_summary_batch(source, SizedModel())
@@ -124,14 +125,45 @@ async def test_plan_checks_all_singles_and_final_requests_preserving_exact_recor
 
 
 @pytest.mark.asyncio
-async def test_late_impossible_single_prevents_all_generation_even_if_parent_would_fit():
+async def test_late_impossible_physical_single_prevents_all_generation():
     source, _, _ = await fixture(['operation completed after delay'] * 7)
     last = records_for_chunk(source.chunks[-1])[-1]['timestamp']
-    model = SizedModel(limit=100, bad_key=last)
+    model = SizedModel(limit=1, bad_key=last)
     with pytest.raises(SectionModelError, match='compact_token_singleton_exceeded'):
         await compact_summary_batch(source, model)
-    assert model.calls == 0 and len(model.checked) == 7
+    assert model.calls == 0 and len(model.checked) == 13
+    assert model.checked[-1] == (last,)
+    assert sum(len(keys) == 1 for keys in model.checked) == 7
     assert all(chunk.compact_evidence is None for chunk in source.chunks)
+
+
+@pytest.mark.asyncio
+async def test_fitting_parent_requires_no_unused_singleton_proofs():
+    source, views, options = await fixture(['operation completed after delay'] * 7)
+    original = records_for_chunk(source.chunks[0])
+    # The hypothetical singleton would fail, but it is never sent. This is a
+    # nonmonotone synthetic oracle, not a tokenizer measurement or bound.
+    model = SizedModel(limit=100, bad_key=original[-1]['timestamp'])
+    packed = await _pack_compact_physical(source, model, SummaryConfig(), views, **options)
+    assert packed == source
+    assert model.checked == [tuple(row['timestamp'] for row in original)]
+    assert model.calls == 0
+    compact = await compact_summary_batch(source, SizedModel(limit=100, bad_key=original[-1]['timestamp']))
+    validate_refinement(source, compact)
+
+
+@pytest.mark.asyncio
+async def test_admission_cache_is_local_to_one_plan():
+    source, views, options = await fixture(['operation completed after delay'] * 7)
+    model = SizedModel(limit=100)
+    await _pack_compact_physical(source, model, SummaryConfig(), views, **options)
+    assert len(model.checked) == 1
+    model.limit = 1
+    model.bad_key = records_for_chunk(source.chunks[-1])[-1]['timestamp']
+    with pytest.raises(SectionModelError, match='compact_token_singleton_exceeded'):
+        await _pack_compact_physical(source, model, SummaryConfig(), views, **options)
+    assert len(model.checked) == 14
+    assert model.calls == 0
 
 
 @pytest.mark.asyncio
