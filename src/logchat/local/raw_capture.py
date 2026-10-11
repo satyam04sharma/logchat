@@ -35,6 +35,8 @@ SAFE_PROCESSING_FAILURES = frozenset({
     "section_output_budget_exceeded", "section_model_input_budget_exceeded", "section_model_identity_required",
     "local_preserving_section_model_required", "compact_timeout", "compact_provider_unavailable",
     "compact_invalid_output", "compact_field_mismatch", "compact_output_budget_exceeded",
+    "compact_token_capability_unavailable", "compact_token_preflight_unavailable",
+    "compact_token_singleton_exceeded", "compact_token_plan_exceeded",
     "compact_input_budget_exceeded", "intake_backpressure_retry_required", "event_identity_content_conflict",
     "legacy_replay_digest_unavailable", "compact_intake_unavailable_retry_required",
     "intake_busy_retry_required", "intake_bridge_unavailable", "model_not_configured",

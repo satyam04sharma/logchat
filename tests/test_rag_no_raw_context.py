@@ -1,4 +1,5 @@
 """Context consumers use compact selected facts without original event messages."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
 from tests.catalog_selector import select_topics
 from dataclasses import replace
 import json
@@ -11,7 +12,7 @@ from logchat.rag.remapper import remap
 from logchat.rag.answering import assemble_context
 from tests.test_rag_compact_summary_context import START, WINDOW, SCOPE, CELL, CONFIG, Backend, Provider, Model
 
-class SummaryModel:
+class SummaryModel(SyntheticPhysicalPreflight):
     local_only=True;preserve_content=True;chat_model='chosen-local-model'
     async def generate(self,instruction,context,schema):
         if 'items' in context:return {'sections':[[r['ref'] for r in context['items']]]}

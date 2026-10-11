@@ -1,4 +1,5 @@
 """Actual fresh compaction seam and active consumers, with deterministic models."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
 from copy import deepcopy
 from dataclasses import asdict, replace
 import json
@@ -21,7 +22,7 @@ from tests.test_compact_embedding_versions import fixture_chunk
 from tests.test_rag_compact_summary_context import Backend, Provider, Model
 
 
-class Selector:
+class Selector(SyntheticPhysicalPreflight):
     local_only = preserve_content = True
     chat_model = 'synthetic-selector'
 

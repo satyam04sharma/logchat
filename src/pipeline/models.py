@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import httpx
 
 from cli.secrets import read_credential
-from pipeline.model_transport import SYSTEM_SAFETY_SUFFIX, model_json
+from pipeline.model_transport import SYSTEM_SAFETY_SUFFIX, model_json, generation_body
 from pipeline.redaction import redact_text, sanitize
 from pipeline.summary import observed_terms, render_summary
 
@@ -129,7 +129,7 @@ def _validate_schema(value, schema, path="response"):
 
 
 class LocalModels:
-    def __init__(self, base_url=None, chat_model=None, embedding_model=None, transport=None, *, preserve_content=False):
+    def __init__(self, base_url=None, chat_model=None, embedding_model=None, transport=None, *, preserve_content=False, generation_token_counter=None):
         self.base_url = base_url or os.getenv("OLLAMA_URL", "http://ollama:11434")
         if urlparse(self.base_url).hostname not in {"ollama", "localhost", "127.0.0.1", "::1", "host.docker.internal"}:
             raise ValueError("Local Ollama endpoint required")
@@ -143,6 +143,8 @@ class LocalModels:
         self.chat_model = chat_model or os.getenv("LOGCHAT_CHAT_MODEL", "qwen2.5:1.5b")
         self.embedding_model = embedding_model or os.getenv("LOGCHAT_EMBEDDING_MODEL", "nomic-embed-text")
         self.transport = transport
+        self.generation_token_counter = generation_token_counter
+        self._generation_token_identity = getattr(generation_token_counter, "identity", None)
 
     async def installed(self):
         try:
@@ -238,15 +240,49 @@ class LocalModels:
         except Exception:
             raise ModelUnavailable("Local generation context guard could not be verified.") from None
 
-    async def generate(self, instruction, context, schema):
-        payload = model_json(context if self.preserve_content else sanitize(context), default=str)
-        if len(payload) > CONTEXT_CHARACTER_BUDGET:
+    def generation_request(self, instruction, context, schema):
+        body = generation_body(self.chat_model, instruction,
+                               context if self.preserve_content else sanitize(context), schema)
+        if len(body["prompt"]) > CONTEXT_CHARACTER_BUDGET:
             raise ModelUnavailable("Context exceeds the local model budget. Select fewer environments or a shorter question.")
+        return body
+
+    async def preflight_generation(self, instruction, context, schema):
+        """Exact local counting only; never use generation as a sizing probe.
+
+        The injected adapter must pin and verify renderer/tokenizer/runtime
+        identity, including effective context and all special-token framing.
+        Missing support fails closed; the QA private-runner helper is not an
+        implementation of this portable production contract.
+        """
+        return await self._preflight_generation_body(self.generation_request(instruction, context, schema))
+
+    async def _preflight_generation_body(self, body):
+        from pipeline.token_budget import GenerationTokenCount, GenerationTokenIdentity
+        counter = self.generation_token_counter
+        if counter is None:
+            raise ModelUnavailable("generation_token_capability_unavailable")
+        try:
+            identity = self._generation_token_identity
+            if (not isinstance(identity, GenerationTokenIdentity)
+                    or identity.runtime_version not in VERIFIED_CONTEXT_GUARD_VERSIONS
+                    or counter.identity != identity):
+                raise ValueError()
+            # Give the adapter immutable exact bytes, not mutable source objects.
+            proof = await counter.count(model_json(body).encode())
+            if not isinstance(proof, GenerationTokenCount) or counter.identity != identity:
+                raise ValueError()
+            return proof.fits(body, identity)
+        except Exception:
+            raise ModelUnavailable("generation_token_proof_unavailable") from None
+
+    async def generate(self, instruction, context, schema):
+        body = self.generation_request(instruction, context, schema)
         await self._require_generation_context_guard()
-        data = await self._post("/api/generate", {"model": self.chat_model, "stream": False,
-            "shift": False, "truncate": True,
-            "system": instruction + SYSTEM_SAFETY_SUFFIX,
-            "prompt": payload, "format": schema, "options": {"temperature": 0, "num_ctx": 8192, "num_predict": 1200}})
+        if self.generation_token_counter is not None:
+            if not await self._preflight_generation_body(body):
+                raise GenerationContextExceeded("Local model input exceeds its native context limit.")
+        data = await self._post("/api/generate", body)
         if data.get("done_reason") == "length":
             raise ModelUnavailable("Local model exhausted its output budget.")
         try:

@@ -1,4 +1,5 @@
 """Exact local-record and model-section tests; all model outputs are mock fixtures."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -34,7 +35,7 @@ def batch(values=None):
     return prepare_preserved_batch(IDENTITY, values if values is not None else [event(), event(1)], WINDOW)
 
 
-class LocalPartitionModel:
+class LocalPartitionModel(SyntheticPhysicalPreflight):
     local_only = True
     preserve_content = True
     chat_model = "mock-local-sections"
@@ -417,7 +418,7 @@ class SectionTests(unittest.IsolatedAsyncioTestCase):
             validate_refinement(original, replace(refined, chunks=(changed,)))
 
 
-class LocalSummaryModel:
+class LocalSummaryModel(SyntheticPhysicalPreflight):
     local_only = True
     preserve_content = True
     chat_model = "mock-local-summary"

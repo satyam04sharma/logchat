@@ -1,4 +1,5 @@
 """Production typed-field regression: exact structured quotes, no native model."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
 from copy import deepcopy
 from itertools import combinations
 import json
@@ -69,7 +70,7 @@ async def test_actual_typed_values_offer_exact_content_and_preserve_complete_inp
         assert phrase.event_keys == tuple(key for key, view in messages.items() if phrase.text in view)
         assert phrase.text in body  # No decoded escape or inferred offset.
 
-    class ExactModel:
+    class ExactModel(SyntheticPhysicalPreflight):
         local_only = preserve_content = True
         chat_model = 'structured-mock'
         calls = 0
@@ -117,7 +118,7 @@ async def test_escaped_unicode_repeated_values_and_cross_body_collisions():
         phrase, = [p for p in catalog.phrases if p.text == topic]
         assert phrase.event_keys == tuple(k for k, v in messages.items() if topic in v)
     _protect_bodies([p.text for p in catalog.phrases], [*messages.values(), *bodies])
-    class UnicodeModel:
+    class UnicodeModel(SyntheticPhysicalPreflight):
         local_only = preserve_content = True
         chat_model = 'structured-unicode-mock'
         calls = 0

@@ -1,4 +1,5 @@
 """Real SQLite/WAL privacy boundaries; all generation and embedding calls mocked."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -31,7 +32,7 @@ class Embeddings:
         return [(1., .1, .2, .3, .4, .5, .6, .7) for _ in texts]
 
 
-class Generation:
+class Generation(SyntheticPhysicalPreflight):
     local_only = True
     preserve_content = True
     chat_model = "mock-compact"
@@ -477,3 +478,46 @@ async def test_canonical_parser_upgrade_replay_and_restart(configured, capture_m
         for path in store.state_dir.iterdir():
             if path.is_file():
                 assert canonical_message.encode() not in path.read_bytes()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['deadline', 'cancel'])
+async def test_physical_preflight_uses_existing_intake_deadline_and_releases_slot(configured, monkeypatch, failure):
+    from logchat.local import rag_runtime
+    store, project, source, model = configured
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+    original_preflight = model.preflight_generation
+    original_timeout = asyncio.timeout
+    seen_deadlines = []
+
+    def timeout(seconds):
+        seen_deadlines.append(seconds)
+        return original_timeout(.05 if seconds == 300 else seconds)
+
+    async def waiting(*args):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(model, 'preflight_generation', waiting)
+    if failure == 'deadline':
+        monkeypatch.setattr(rag_runtime.asyncio, 'timeout', timeout)
+    original = event(source)
+    task = asyncio.create_task(store.rag_runtime.ingest_async(project['id'], source['id'], [original]))
+    await entered.wait()
+    if failure == 'cancel':
+        task.cancel()
+    with pytest.raises(asyncio.CancelledError if failure == 'cancel' else ModelUnavailable):
+        await task
+    assert cancelled.is_set()
+    assert all('items' in call for call in model.calls)
+    if failure == 'deadline':
+        assert seen_deadlines == [300]
+    with store.rag_runtime.backend.connect() as connection:
+        assert connection.execute('SELECT COUNT(*) FROM rag_schedule_jobs').fetchone()[0] == 0
+    monkeypatch.setattr(model, 'preflight_generation', original_preflight)
+    monkeypatch.setattr(rag_runtime.asyncio, 'timeout', original_timeout)
+    receipt = await store.rag_runtime.ingest_async(project['id'], source['id'], [original])
+    assert receipt['accepted'] == 1 and receipt['jobs']

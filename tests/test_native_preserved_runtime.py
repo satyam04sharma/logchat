@@ -1,4 +1,5 @@
 from tests.catalog_selector import select_topics
+from tests.physical_preflight import SyntheticPhysicalPreflight
 import asyncio,json
 from datetime import datetime,timedelta,timezone
 import pytest
@@ -23,7 +24,7 @@ async def test_preserved_intake_refinement_embedding_query_inspection_and_chat(t
             texts.extend(values);return [(1,.1,.2,.3,.4,.5,.6,.7) for _ in values]
     async def create(**kwargs):return Provider()
     monkeypatch.setattr(OllamaEmbeddingProvider,'create',create)
-    class LocalModel:
+    class LocalModel(SyntheticPhysicalPreflight):
         preserve_content=True;local_only=True;chat_model='mock-local'
         def __init__(self,**kwargs):pass
         async def generate(self,instruction,context,schema):

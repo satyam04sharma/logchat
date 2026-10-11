@@ -1,4 +1,5 @@
 """Compact storage contracts; model responses here are explicit mock fixtures."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
 from dataclasses import asdict, replace
 import json
 import unittest
@@ -11,7 +12,7 @@ from logchat.rag.sections import (COMPACT_VERSION, SectionModelError, SummaryCon
 from tests.test_rag_sections import LocalPartitionModel, SPEC, batch, event
 
 
-class CompactModel:
+class CompactModel(SyntheticPhysicalPreflight):
     local_only = preserve_content = True
     chat_model = "mock-compact-model"
 

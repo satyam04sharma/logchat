@@ -1210,6 +1210,79 @@ def _pack_compact_sections(batch, config, messages=None, *, source_catalog=None,
     return refined
 
 
+async def _pack_compact_physical(batch, local_model, config, messages=None, **catalog_options):
+    """Plan completely before generation; never assume token-count monotonicity.
+
+    Character/evidence bounds still apply. Exact checks use a call-local cache
+    of complete requests, followed by deterministic bisection of selected
+    memberships. Every singleton is checked even when its parent fits.
+    """
+    from pipeline.model_transport import generation_body
+    from pipeline.token_budget import request_digest
+    packed = _pack_compact_sections(batch, config, messages, **catalog_options)
+    preflight = getattr(local_model, "preflight_generation", None)
+    if not callable(preflight):
+        raise SectionModelError("compact_token_capability_unavailable", "compact_summary")
+    instruction = CATALOG_COMPACT_INSTRUCTION if catalog_options.get("source_catalog") is not None else COMPACT_INSTRUCTION
+    cache = {}
+
+    async def fits(chunk):
+        rows = records_for_chunk(chunk)
+        _compact_feasible(chunk, rows, config, messages, **catalog_options)
+        payload, schema, _, _ = _compact_request(chunk, rows, config, messages, **catalog_options)
+        key = request_digest(generation_body(local_model.chat_model, instruction, payload, schema))
+        if key not in cache:
+            try:
+                value = await asyncio.wait_for(preflight(instruction, payload, schema),
+                                               timeout=config.timeout_seconds)
+                if type(value) is not bool:
+                    raise ValueError()
+            except TimeoutError:
+                raise SectionModelError("compact_timeout", "compact_summary") from None
+            except ModelUnavailable as error:
+                category = ("compact_token_capability_unavailable"
+                            if str(error) == "generation_token_capability_unavailable"
+                            else "compact_token_preflight_unavailable")
+                raise SectionModelError(category, "compact_summary") from None
+            except Exception:
+                raise SectionModelError("compact_token_preflight_unavailable", "compact_summary") from None
+            cache[key] = value
+        return cache[key]
+
+    def subset(chunk, rows):
+        child = make_chunk(batch.batch_id, batch.identity, chunk.window, rows, SECTION_VERSION)
+        return replace(child, loss_notes=chunk.loss_notes)
+
+    # This pass is deliberately independent of parent admission: tokenizers
+    # need not be monotone after local refs/catalogs/schema have been rebuilt.
+    for chunk in packed.chunks:
+        for row in records_for_chunk(chunk):
+            if not await fits(subset(chunk, [row])):
+                raise SectionModelError("compact_token_singleton_exceeded", "compact_summary")
+
+    async def split(chunk):
+        if await fits(chunk):
+            return [chunk]
+        rows = records_for_chunk(chunk)
+        if len(rows) == 1:
+            raise SectionModelError("compact_token_singleton_exceeded", "compact_summary")
+        middle = len(rows) // 2
+        left = await split(subset(chunk, rows[:middle]))
+        right = await split(subset(chunk, rows[middle:]))
+        return left + right
+
+    output = []
+    for chunk in packed.chunks:
+        output.extend(await split(chunk))
+    refined = replace(batch, chunks=tuple(output))
+    validate_refinement(batch, refined)
+    # Exact same complete request spellings are required at final admission.
+    for chunk in refined.chunks:
+        if not await fits(chunk):
+            raise SectionModelError("compact_token_plan_exceeded", "compact_summary")
+    return refined
+
+
 async def compact_summary_batch(batch, local_model, *, config=None, model_events=None):
     """Select checked source observations atomically; retain no complete bodies."""
     config = config or SummaryConfig()
@@ -1245,7 +1318,7 @@ async def compact_summary_batch(batch, local_model, *, config=None, model_events
     except (ValueError, TypeError, RecursionError):
         raise SectionModelError("compact_catalog_construction_failed", "compact_summary") from None
     catalog_options = {"source_catalog": catalog, "protected_bodies": excluded_messages}
-    packed_batch = _pack_compact_sections(batch, config, messages, **catalog_options)
+    packed_batch = await _pack_compact_physical(batch, local_model, config, messages, **catalog_options)
     output = []
     for chunk in packed_batch.chunks:
         records = records_for_chunk(chunk)

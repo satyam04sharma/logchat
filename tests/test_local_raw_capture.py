@@ -1,4 +1,5 @@
 """Temporary originals use real SQLite; every generation/embedding provider is mocked."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
 from tests.catalog_selector import select_topics
 import asyncio
 from dataclasses import replace
@@ -181,7 +182,7 @@ class Embeddings:
         return [(1., .1, .2, .3, .4, .5, .6, .7) for _ in texts]
 
 
-class Generation:
+class Generation(SyntheticPhysicalPreflight):
     local_only = True
     preserve_content = True
     chat_model = "mock-capture-model"

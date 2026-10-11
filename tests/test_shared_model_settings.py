@@ -1,4 +1,5 @@
 """Shared settings use real local SQLite and mocked local model calls only."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
 from tests.catalog_selector import select_topics
 import asyncio
 from dataclasses import asdict
@@ -29,7 +30,7 @@ class Embeddings:
         return [tuple([1.] + [.1] * (self.spec.dimensions - 1)) for _ in texts]
 
 
-class Generation:
+class Generation(SyntheticPhysicalPreflight):
     local_only = True
     preserve_content = True
 

@@ -1,4 +1,5 @@
 """Backward replay and exact search when embeddings use compact text."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
 from tests.catalog_selector import select_topics
 import asyncio
 import json
@@ -32,7 +33,7 @@ def test_compact_summary_lexical_search_retains_selected_exact_identifiers(tmp_p
     from logchat.rag.sections import section_batch, compact_summary_batch
     from logchat.rag.builder import prepare_preserved_batch
     original = prepare_preserved_batch(IDENTITY, [event(1, message='Session renewal rejected user=ExactUserXYZ raw_body_canary')], WINDOW)
-    class Model:
+    class Model(SyntheticPhysicalPreflight):
         local_only=True;preserve_content=True;chat_model='fixture-local'
         async def generate(self,instruction,context,schema):
             if 'items' in context:return {'sections':[[row['ref'] for row in context['items']]]}
