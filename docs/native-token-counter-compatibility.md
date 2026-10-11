@@ -80,9 +80,10 @@ and physical `(true,true)` counts for an immutable complete `/api/embed` body
 with model, already-prefixed input list and truncate false. It verifies the pinned
 2048 context/768-dimensional metadata and reports prefix-v1. It does not add
 prefixes, change the old embedding request/source recipes, submit embeddings,
-refine chunks or claim the active embedding runner's loaded context. That later
-stage must bind the actual embedding submission and independently verify its
-runtime context before using these proofs for admission.
+refine chunks or claim the active embedding runner's loaded context. The separate
+fresh-intake planner reconstructs oversized v3 chunks from exact source-record
+intervals, validates conservation, and counts every final prefixed request before
+enqueue. Existing queued and indexed payloads retain their original recipes.
 
 ## Validation boundary
 
@@ -91,7 +92,13 @@ HTTP transport, then exercise the **default** profile/client, exact closure and
 real C-worker IPC. Synthetic counts prove wiring, framing, flags, caching and
 ownership only. They do not establish native token-count parity.
 
-Root must independently run actual default-adapter parity against the saved
-complete Mistral render (7502 tokens) and retained Nomic inputs, including control
-and Unicode cases, and review real lifecycle behavior. Embedding refinement,
-fresh 1200/100K validation and release approval remain separate and blocked.
+Actual default-adapter parity passed against the saved complete Mistral render
+(7502 tokens) and all 19 retained Nomic inputs. The two owned vocabulary workers
+exited and removed their staging directories. Ten accepted individual Nomic
+requests match provider token counts; six rejected inputs exceed 2048 physical
+tokens. These checks establish the measured counter behavior, not acceptance of
+new subdivided inputs or a loaded-runner context reported by `/api/ps`.
+
+Fresh complete 1200/100K simulations, source-context validation, installed-browser
+acceptance and release approval remain separate gates. See the
+[bug report](qa/100k-bug-report.md) for current status and retained failures.
