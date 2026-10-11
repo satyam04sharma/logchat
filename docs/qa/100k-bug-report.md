@@ -206,3 +206,10 @@ A model-only record projection now hoists exactly identical typed values and car
 The remaining adapter work must use verified provider behavior to reject oversized input rather than silently trim it. On the inspected native version, `truncate:true` invokes the provider's exact tokenizer and `shift:false` disables the truncation branch; an overfull prompt then fails before generation. The conservative version policy, bounded error handling and compact transport must be independently reviewed. Native QA will verify the full rendered prompt plus the 1,200-token output reserve fits the unchanged 8,192-token window. No context, model or selection limits are increased.
 
 The host independently reran the corrected query helper's offline preflight: 12 validator cases and 20 API-shape/citation/quality cases passed with zero network or model calls. Fresh native exact/cross-service/semantic and twelve-memory breadth proofs, corrected prose, installed browser checks, the complete fresh pilot and fully indexed 100K cycle remain outstanding. No publication go-ahead or GitHub merge is authorized by these intermediate test results.
+
+
+## Review caught a native guard routing gap
+
+Independent review of the initial context-guard candidate found that GGUF/completion/empty-history metadata also permits a model with nonempty `remote_host` and `remote_model`. Ollama's inspected generation handler proxies such models before scheduling the verified local runner, bypassing the context guard. Thus a configured loopback endpoint alone does not establish local execution or input preservation.
+
+The candidate is withheld pending a minimal correction: reject either remote-routing field when nonempty or malformed before generation, and prove this with both-field, single-field and between-call model-metadata changes. No remote requests or actual native proof calls were made during this review. The projection and compact transport remain independently valid; passing tests on the initial guard does not override this finding.
