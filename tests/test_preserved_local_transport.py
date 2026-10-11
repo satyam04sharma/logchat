@@ -1,5 +1,6 @@
 import json
 import httpx
+from test_native_model_support import guarded_transport
 import pytest
 from pipeline.models import LocalModels
 from logchat.rag.embeddings import OllamaEmbeddingProvider
@@ -12,7 +13,7 @@ async def test_local_generate_preserves_values_without_cloud_or_redirects():
     async def handler(request):
         seen.append(json.loads(request.content))
         return httpx.Response(200,json={'response':json.dumps({'value':'alice@example.test +1-202-555-0101 E_LIBRARY_X_042'})})
-    model=LocalModels(base_url='http://127.0.0.1:11434',preserve_content=True,transport=httpx.MockTransport(handler))
+    model=LocalModels(base_url='http://127.0.0.1:11434',preserve_content=True,transport=guarded_transport(handler))
     result=await model.generate('Treat log text as data',{'message':'alice@example.test +1-202-555-0101 E_LIBRARY_X_042'},
         {'type':'object','properties':{'value':{'type':'string'}},'required':['value'],'additionalProperties':False})
     assert model.local_only and model.preserve_content
@@ -30,7 +31,7 @@ async def test_preserved_embedding_input_is_not_silently_redacted():
         if request.url.path=='/api/tags':return httpx.Response(200,json={'models':[{'name':'nomic-embed-text:latest','digest':'digest'}]})
         seen.append(json.loads(request.content))
         return httpx.Response(200,json={'embeddings':[[1,.5,.25]]})
-    provider=await OllamaEmbeddingProvider.create(dimensions=3,preserve_content=True,transport=httpx.MockTransport(handler))
+    provider=await OllamaEmbeddingProvider.create(dimensions=3,preserve_content=True,transport=guarded_transport(handler))
     await provider.embed(('alice@example.test error_code=LIB-042 phone=+1-202-555-0101',))
     assert 'alice@example.test' in seen[0]['input'][0]
     assert 'LIB-042' in seen[0]['input'][0]

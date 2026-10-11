@@ -47,8 +47,7 @@ class Model:
         self.calls.append((instruction, payload, schema))
         if self.result is not None:
             return self.result
-        return {"selections": [{"evidence_ref": item["evidence_ref"], "reason": "topic_match", "confidence": .9}
-                               for cell in payload["cells"] for item in cell["candidates"]]}
+        return {"label": "topic_match", "confidence": .9}
 
 
 class ExactValueTests(unittest.IsolatedAsyncioTestCase):
@@ -59,10 +58,10 @@ class ExactValueTests(unittest.IsolatedAsyncioTestCase):
         checked = await remap(retrieval("What happened with phone +1-202-555-0102?", alice, bob),
                               model, config=CONFIG, preserve_content=True)
         self.assertEqual([item.candidate.chunk.chunk_id for item in checked.selected], ["bob"])
-        supplied = model.calls[0][1]["cells"][0]["candidates"]
+        supplied = [call[1]["candidate"] for call in model.calls]
         self.assertEqual(len(supplied), 1)
-        self.assertEqual(supplied[0]["evidence_ref"], "e0")
-        self.assertEqual(model.calls[0][2]["properties"]["selections"]["items"]["properties"]["evidence_ref"]["enum"], ["e0"])
+        self.assertEqual(supplied[0]["candidate_ref"], "c0")
+        self.assertEqual(model.calls[0][2]["required"], ["label", "confidence"])
         self.assertEqual(json.loads(checked.provenance[0].detail)["literal_nonmatching_candidates"], 1)
 
     async def test_readable_records_replace_framed_summary_and_derived_hashes(self):
@@ -70,7 +69,7 @@ class ExactValueTests(unittest.IsolatedAsyncioTestCase):
         item = candidate("derived-chunk-hash", row)
         model = Model()
         await remap(retrieval("Why was authentication rejected?", item), model, config=CONFIG, preserve_content=True)
-        payload = model.calls[0][1]["cells"][0]["candidates"][0]
+        payload = model.calls[0][1]["candidate"]
         self.assertNotIn("template", payload)
         self.assertNotIn("chunk_id", payload)
         self.assertNotIn(RECORD_PREFIX, json.dumps(payload))
@@ -120,7 +119,7 @@ class ExactValueTests(unittest.IsolatedAsyncioTestCase):
         for question in ("Why did visitors need to authenticate again?", "Compare gateway error behavior with normal sessions"):
             model = Model()
             checked = await remap(retrieval(question, failure, baseline), model, config=CONFIG, preserve_content=True)
-            self.assertEqual(len(model.calls[0][1]["cells"][0]["candidates"]), 2)
+            self.assertEqual(len(model.calls), 2)
             self.assertEqual(json.loads(checked.provenance[0].detail)["literal_anchor_fields"], 0)
 
     async def test_matching_subset_does_not_rewrite_immutable_section_metrics(self):
@@ -131,7 +130,7 @@ class ExactValueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(checked.selected[0].candidate, mixed)
         self.assertEqual(checked.selected[0].candidate.chunk.metrics.event_count, 2)
         self.assertIn("current:literal_matches_are_record_subset_whole_section_metrics_not_entity_totals", checked.gaps)
-        payload = model.calls[0][1]["cells"][0]["candidates"][0]
+        payload = model.calls[0][1]["candidate"]
         self.assertEqual(payload["literal_matching_record_indexes"], [0])
         self.assertEqual(payload["literal_matching_record_count"], 1)
         self.assertEqual(payload["observed_metrics"]["events"], 2)
@@ -142,7 +141,7 @@ class ExactValueTests(unittest.IsolatedAsyncioTestCase):
         model = Model()
         checked = await remap(retrieval("Is it true after 1 attempt?", first, second), model,
                               config=CONFIG, preserve_content=True)
-        self.assertEqual(len(model.calls[0][1]["cells"][0]["candidates"]), 2)
+        self.assertEqual(len(model.calls), 2)
         self.assertEqual(json.loads(checked.provenance[0].detail)["literal_anchor_fields"], 0)
 
     async def test_nonstandard_json_constants_remain_prose_without_partial_anchors(self):
@@ -155,12 +154,13 @@ class ExactValueTests(unittest.IsolatedAsyncioTestCase):
                 model = Model()
                 checked = await remap(retrieval("Inspect River Birch", first, second), model,
                                       config=CONFIG, preserve_content=True)
-                self.assertEqual(len(model.calls[0][1]["cells"][0]["candidates"]), 2)
+                self.assertEqual(len(model.calls), 2)
                 self.assertEqual(json.loads(checked.provenance[0].detail)["literal_anchor_fields"], 0)
 
     async def test_anchor_eligibility_does_not_replace_model_relevance_or_membership(self):
         wanted = candidate("wanted", record("event-a", {"account": "River Birch"}))
-        for reply in ({"selections": []}, {"selections": [{"evidence_ref": "invented", "reason": "topic_match", "confidence": .9}]}):
+        for reply in ({"label": "not_relevant", "confidence": .9},
+                      {"judgements": {"invented": {"label": "topic_match", "confidence": .9}}}):
             model = Model(reply)
             checked = await remap(retrieval("Inspect River Birch", wanted), model, config=CONFIG, preserve_content=True)
             self.assertEqual(len(model.calls), 1)

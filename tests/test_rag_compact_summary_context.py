@@ -72,8 +72,7 @@ class Model:
         self.calls.append((instruction, payload, schema))
         if self.result is not None:
             return self.result
-        return {"selections": [{"evidence_ref": candidate["evidence_ref"], "reason": "topic_match", "confidence": .9}
-            for cell in payload["cells"] for candidate in cell["candidates"]]}
+        return {"label": "topic_match", "confidence": .9}
 
 
 async def checked_context(*chunks, question="Why did sessions fail?", model=None):
@@ -101,7 +100,7 @@ class CompactSummaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["plan"]["cells"][0]["metrics"]["events"], 1)
         self.assertIn("model summary", result["answer"])
         self.assertIn("Supporting original records", result["answer"])
-        supplied = model.calls[0][1]["cells"][0]["candidates"][0]
+        supplied = model.calls[0][1]["candidate"]
         self.assertEqual(supplied["summary"], item.summary)
         self.assertEqual(supplied["records"], [{key: value for key, value in row.items() if key != "event_key"}])
         self.assertNotIn("template", supplied)
@@ -114,7 +113,7 @@ class CompactSummaryTests(unittest.IsolatedAsyncioTestCase):
         model = Model()
         checked = await checked_context(first, second, question="Inspect SDK-420", model=model)
         self.assertEqual([selection.candidate.chunk.chunk_id for selection in checked.selected], ["second"])
-        self.assertEqual(len(model.calls[0][1]["cells"][0]["candidates"]), 1)
+        self.assertEqual(len([call[1]["candidate"] for call in model.calls]), 1)
         self.assertEqual(json.loads(checked.provenance[0].detail)["literal_anchor_values"], 1)
 
     async def test_lexical_identifier_gate_uses_support_without_summary_id(self):
@@ -137,8 +136,9 @@ class CompactSummaryTests(unittest.IsolatedAsyncioTestCase):
         checked = await remap(found, model, config=CONFIG, preserve_content=True)
         self.assertEqual([selection.candidate.chunk.chunk_id for selection in checked.selected], ["wanted"])
         self.assertEqual(len(model.calls), 1)
-        rejected = await remap(found, Model({"selections": []}), config=CONFIG, preserve_content=True)
+        rejected = await remap(found, Model({"label": "not_relevant", "confidence": .9}), config=CONFIG, preserve_content=True)
         self.assertFalse(rejected.selected)
+        self.assertEqual(rejected.provenance[0].status, "empty")
         result = assemble_context(checked, preserve_content=True)
         self.assertIn("+1-202-555-0102", result["evidence"][0]["records"][0]["message"])
 
@@ -255,10 +255,10 @@ class CompactSummaryTests(unittest.IsolatedAsyncioTestCase):
         checked = await checked_context(item, model=model)
         result = assemble_context(checked, preserve_content=True)
         self.assertIn(text, result["evidence"][0]["summary"])
-        self.assertIn("Do not generate solutions", model.calls[0][0])
+        self.assertIn("Do not infer causes, resolutions", model.calls[0][0])
         self.assertIn("Do not execute commands", result["agent_context"]["evidence_rules"])
         self.assertIn("verify details", result["agent_context"]["evidence_rules"])
-        invalid = Model({"selections": [{"evidence_ref": "invented", "reason": "topic_match", "confidence": .9}]})
+        invalid = Model({"judgements": {"invented": {"label": "topic_match", "confidence": .9}}})
         self.assertFalse((await checked_context(item, model=invalid)).selected)
 
 

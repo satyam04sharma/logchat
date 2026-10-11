@@ -26,7 +26,7 @@ CELL = plan_cells("owner", "project", ("prod",), WINDOW,
 
 
 def compact(service, index, *, incident="INC_CORRELATION_73", source=None, summary=None,
-            code=None, environment="prod", window=WINDOW):
+            code=None, source_ref=None, environment="prod", window=WINDOW):
     identity = SourceIdentity("owner", "project", environment, source or service)
     identifier = f"run-{service}-{index:06d}"
     record = {"ref": "e0", "event_key": event_key(identity, identifier), "event_id": identifier,
@@ -35,6 +35,8 @@ def compact(service, index, *, incident="INC_CORRELATION_73", source=None, summa
     fields = [{"key": "incident_id", "value": incident, "event_refs": ["e0"]}]
     if code is not None:
         fields.append({"key": "error_code", "value": code, "event_refs": ["e0"]})
+    if source_ref is not None:
+        fields.append({"key": "ref", "value": source_ref, "event_refs": ["e0"]})
     fields.sort(key=lambda field: field["key"])
     evidence = _json({"version": COMPACT_EVIDENCE_VERSION, "records": [record],
                       "important_fields": fields, "uncertainties": [_OMISSION_NOTICE]})
@@ -86,37 +88,51 @@ class Selector:
 
     async def generate(self, instruction, payload, schema):
         self.calls.append((instruction, payload, schema))
-        options = payload["cells"][0]["candidates"]
-        seen, chosen = set(), []
-        for item in options:
-            if self.mode == "partial" and item["service"] == "auth":
-                continue  # Explicit mock rejection; never fabricated coverage.
-            if item["service"] not in seen:
-                chosen.append({"evidence_ref": item["evidence_ref"], "reason": "topic_match",
-                               "confidence": .2 if self.mode == "low_auth" and item["service"] == "auth" else .9})
-                seen.add(item["service"])
-        if self.mode == "empty":
-            chosen = []
-        return {"selections": chosen[:min(payload["limits"].values())]}
+        item = payload["candidate"]
+        # Independent semantic decisions; capacity and diversity belong to remap.
+        if self.mode == "empty" or (self.mode == "partial" and item["service"] == "auth"):
+            return {"label": "not_relevant", "confidence": .9}
+        return {"label": "topic_match", "confidence":
+                .2 if self.mode == "low_auth" and item["service"] == "auth" else .9}
 
 
 class AlternativeSelector(Selector):
-    """Explicit mock: choose one observation per supplied incident alternative."""
+    """Every retained comparison observation independently contributes support."""
 
     async def generate(self, instruction, payload, schema):
         self.calls.append((instruction, payload, schema))
-        seen, selections = set(), []
-        for cell in payload["cells"]:
-            for candidate in cell["candidates"]:
-                values = {field["value"] for row in candidate["records"] for field in row["important_fields"]
-                          if field["key"] == "incident_id"}
-                if values - seen:
-                    selections.append({"evidence_ref": candidate["evidence_ref"], "reason": "comparison_baseline", "confidence": .9})
-                    seen.update(values)
-        return {"selections": selections}
+        return {"label": "comparison_baseline", "confidence": .9}
 
 
 class SourceDiversityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fixed_candidate_keys_do_not_alias_compact_record_or_source_refs(self):
+        from logchat.rag.answering import assemble_context
+        from logchat.rag.sections import records_for_chunk
+        chunks = tuple(compact(service, 0, source_ref="c1") for service in ("worker", "auth", "web"))
+        original_bytes = tuple(item.compact_evidence for item in chunks)
+        found = await retrieve(QUESTION, (CELL,), Backend(chunks), Provider(), preserve_content=True)
+        model = Selector()
+        checked = await remap(found, model, config=CONFIG, preserve_content=True)
+        self.assertEqual({item.candidate.chunk.service for item in checked.selected}, {"worker", "auth", "web"})
+        _, payload, schema = model.calls[0]
+        supplied = [call[1]["candidate"] for call in model.calls]
+        refs = [item["candidate_ref"] for item in supplied]
+        self.assertEqual(refs, ["c0", "c1", "c2"])
+        self.assertEqual(schema["required"], ["label", "confidence"])
+        self.assertEqual(set(schema["properties"]), {"label", "confidence"})
+        self.assertIs(schema["additionalProperties"], False)
+        self.assertTrue(all(call[2] == schema for call in model.calls))
+        for item in supplied:
+            self.assertEqual(item["records"][0]["ref"], "e0")
+            self.assertIn({"key": "ref", "value": "c1"}, item["records"][0]["important_fields"])
+        self.assertEqual(tuple(item.compact_evidence for item in chunks), original_bytes)
+        for chunk in chunks:
+            validate_compact_chunk(chunk)
+            self.assertEqual(records_for_chunk(chunk)[0]["ref"], "e0")
+        result = assemble_context(checked, preserve_content=True)
+        self.assertEqual(set(result["cited_evidence_ids"]), {item.chunk_id for item in chunks})
+        self.assertEqual(len(result["citations"]), 3)
+
     async def test_joint_field_witness_precedes_twelve_partial_matches(self):
         chunks = tuple(compact("web", index) for index in range(12))
         joint = compact("web", 12, code="AUTH_FAIL_73")
@@ -143,12 +159,17 @@ class SourceDiversityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(second.chunk_id, {candidate.chunk.chunk_id for candidate in found.candidates})
         model = AlternativeSelector()
         checked = await remap(found, model, config=CONFIG, preserve_content=True)
-        supplied = model.calls[0][1]["cells"][0]["candidates"]
+        supplied = [call[1]["candidate"] for call in model.calls]
         self.assertEqual(len(supplied), 6)
         self.assertTrue(any(row["important_fields"][0]["value"] == "OTHER_INCIDENT_44"
                             for item in supplied for row in item["records"]))
-        self.assertEqual(len(checked.selected), 2)
-        self.assertEqual(json.loads(checked.provenance[0].detail)["literal_anchor_fields"], 1)
+        self.assertEqual(len(checked.selected), 3)
+        self.assertIn(second.chunk_id, {item.candidate.chunk.chunk_id for item in checked.selected})
+        detail = json.loads(checked.provenance[0].detail)
+        self.assertEqual(detail["literal_anchor_fields"], 1)
+        self.assertEqual(detail["positive_labels"], 6)
+        self.assertEqual(detail["rejected_labels"], 0)
+        self.assertEqual(detail["omitted_by_selection_limit"], 3)
 
     async def test_shared_comparison_anchors_span_environment_and_period_cells(self):
         current = tuple(compact("web", index) for index in range(13))
@@ -164,7 +185,9 @@ class SourceDiversityTests(unittest.IsolatedAsyncioTestCase):
                 found = await retrieve(question, (CELL, other_cell), Backend(current + (other,)), Provider(), preserve_content=True)
                 checked = await remap(found, AlternativeSelector(), config=CONFIG, preserve_content=True)
                 self.assertEqual({item.candidate.cell_id for item in checked.selected}, {CELL.cell_id, "other"})
-                self.assertEqual(len(checked.selected), 2)
+                self.assertEqual(len(checked.selected), 4)
+                self.assertEqual([item.candidate.cell_id for item in checked.selected],
+                                 [CELL.cell_id, "other", CELL.cell_id, CELL.cell_id])
                 self.assertEqual(json.loads(checked.provenance[0].detail)["literal_anchor_fields"], 1)
 
     async def test_fields_in_different_records_cannot_manufacture_joint_witness(self):
@@ -197,7 +220,7 @@ class SourceDiversityTests(unittest.IsolatedAsyncioTestCase):
         smaller = await retrieve(smaller_question, (CELL,), Backend(chunks[:7]), Provider(), preserve_content=True)
         model = Selector()
         checked = await remap(smaller, model, config=CONFIG, preserve_content=True)
-        self.assertEqual(len(model.calls[0][1]["cells"][0]["candidates"]), 6)
+        self.assertEqual(len(model.calls), 6)
         self.assertIn(f"{CELL.cell_id}:literal_or_service_witnesses_exceed_candidate_limit", checked.gaps)
         self.assertEqual(checked.provenance[0].status, "partial")
 
@@ -220,8 +243,8 @@ class SourceDiversityTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("INC_CORRELATION_73" in c.chunk.compact_evidence for c in found.candidates))
         model = Selector()
         checked = await remap(found, model, config=CONFIG, preserve_content=True)
-        supplied = model.calls[0][1]["cells"][0]
-        self.assertEqual(Counter(item["service"] for item in supplied["candidates"]), {"web": 2, "worker": 2, "auth": 2})
+        supplied = model.calls[0][1]["cell"]
+        self.assertEqual(Counter(call[1]["candidate"]["service"] for call in model.calls), {"web": 2, "worker": 2, "auth": 2})
         self.assertEqual(set(supplied["requested_services"]), {"web", "worker", "auth"})
         self.assertEqual({item.candidate.chunk.service for item in checked.selected}, {"web", "worker", "auth"})
         self.assertEqual(len(checked.selected), 3)
@@ -229,8 +252,21 @@ class SourceDiversityTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(detail["input_characters"], CONFIG.input_character_budget)
         self.assertLessEqual(detail["input_utf8_bytes"], CONFIG.input_byte_budget)
         self.assertEqual(detail["requested_service_coverage"][CELL.cell_id]["missing"], [])
-        self.assertIn("prioritize one relevant observation per service", model.calls[0][0])
-        self.assertEqual(checked, await remap(found, Selector(), config=CONFIG, preserve_content=True))
+        self.assertEqual(detail["validated_classifications"], 6)
+        self.assertEqual(detail["positive_labels"], 6)
+        self.assertEqual(detail["rejected_labels"], 0)
+        self.assertEqual(detail["omitted_by_selection_limit"], 3)
+        self.assertEqual([call[1]["candidate"]["service"] for call in model.calls[:3]],
+                         [item.candidate.chunk.service for item in checked.selected])
+        self.assertIn("Partial support", model.calls[0][0])
+        repeated = await remap(found, Selector(), config=CONFIG, preserve_content=True)
+        self.assertEqual(checked.selected, repeated.selected)
+        self.assertEqual(checked.gaps, repeated.gaps)
+        repeated_detail = json.loads(repeated.provenance[0].detail)
+        for ledger in (detail["classification_calls"], repeated_detail["classification_calls"]):
+            for call in ledger:
+                call.pop("elapsed_seconds")
+        self.assertEqual(detail, repeated_detail)
 
     async def test_model_rejection_and_low_confidence_are_honest_partial_coverage(self):
         chunks = tuple(compact(service, index) for service in ("web", "worker", "auth") for index in range(4))
@@ -240,7 +276,12 @@ class SourceDiversityTests(unittest.IsolatedAsyncioTestCase):
                 checked = await remap(found, Selector(mode), config=CONFIG, preserve_content=True)
                 self.assertNotIn("auth", {item.candidate.chunk.service for item in checked.selected})
                 self.assertIn(f"{CELL.cell_id}:requested_service_coverage_incomplete", checked.gaps)
-                self.assertEqual(checked.provenance[0].status, "empty" if mode == "empty" else "partial")
+                self.assertEqual(checked.provenance[0].status, "partial")
+                detail = json.loads(checked.provenance[0].detail)
+                self.assertEqual(detail["validated_classifications"], 6)
+                self.assertEqual(detail["omitted_by_admission_limit"], 6)
+                self.assertEqual(detail["rejected_labels"], 6 if mode == "empty" else 2 if mode == "partial" else 0)
+                self.assertEqual(detail["below_confidence_threshold"], 2 if mode == "low_auth" else 0)
         unavailable = await remap(found, None, config=CONFIG, preserve_content=True)
         self.assertFalse(unavailable.selected)
         self.assertEqual(unavailable.provenance[0].status, "unavailable")
@@ -251,7 +292,7 @@ class SourceDiversityTests(unittest.IsolatedAsyncioTestCase):
         found = await retrieve(QUESTION, (CELL,), Backend(chunks), Provider(), preserve_content=True)
         model = Selector()
         checked = await remap(found, model, config=CONFIG, preserve_content=True)
-        self.assertNotIn("auth", {item["service"] for item in model.calls[0][1]["cells"][0]["candidates"]})
+        self.assertNotIn("auth", {call[1]["candidate"]["service"] for call in model.calls})
         self.assertEqual(checked.provenance[0].status, "partial")
         self.assertIn(f"{CELL.cell_id}:requested_services_without_eligible_evidence", checked.gaps)
         self.assertIn("auth", json.loads(checked.provenance[0].detail)["requested_service_coverage"][CELL.cell_id]["missing"])
@@ -274,7 +315,7 @@ class SourceDiversityTests(unittest.IsolatedAsyncioTestCase):
         checked = await remap(found, model, config=CONFIG, preserve_content=True)
         self.assertTrue(checked.selected)
         self.assertTrue(all(item.candidate.chunk.service == "web" for item in checked.selected))
-        self.assertNotIn("requested_services", model.calls[0][1]["cells"][0])
+        self.assertNotIn("requested_services", model.calls[0][1]["cell"])
         self.assertNotIn("requested_service_coverage", json.loads(checked.provenance[0].detail))
 
     async def test_many_web_sources_cannot_consume_other_service_slots(self):
@@ -285,7 +326,7 @@ class SourceDiversityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Counter(c.chunk.service for c in found.candidates), {"web": 4, "worker": 4, "auth": 4})
         model = Selector()
         checked = await remap(found, model, config=CONFIG, preserve_content=True)
-        supplied = model.calls[0][1]["cells"][0]["candidates"]
+        supplied = [call[1]["candidate"] for call in model.calls]
         self.assertEqual(Counter(item["service"] for item in supplied), {"web": 2, "worker": 2, "auth": 2})
         self.assertEqual(len({item["source_id"] for item in supplied if item["service"] == "web"}), 2)
         self.assertEqual({item.candidate.chunk.service for item in checked.selected}, {"web", "worker", "auth"})

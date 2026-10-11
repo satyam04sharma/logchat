@@ -752,6 +752,12 @@ measurements are preserved separately and need not be selected again.
 The summary may paraphrase; it is not constrained to source excerpts.
 Use the supplied exact_metrics;
 their authoritative values are computed independently of this summary.
+Each record's request_status, duration_ms and timestamp belong only to that
+record's ref and message. Use only these supported associations; never assign
+a whole-section status or duration to other messages or blanket-label failures.
+Null measurements are unknown, not zero. exact_metrics cover the WHOLE section.
+Records grouped here need not be consecutive in the original source stream;
+their ordering and observed_window do not establish source adjacency.
 duration_sum_ms adds measured work durations across events; it is NOT elapsed
 wall-clock time or a period during which the events occurred. observed_window
 provides the first/last event timestamps and their actual span_ms separately.
@@ -1012,8 +1018,11 @@ def _compact_request(chunk, records, config, messages=None):
     # Model-only projection: durable attribution is assembled from metadata,
     # never from model output. Validated views keep complete producer text,
     # refs and ordering; catalogs above remain canonical. Do not repeat replay keys,
-    # source IDs or measurements already represented by exact_metrics.
-    payload = {"records": [{"ref": row["ref"], "message": messages[record["event_key"]]
+    # source IDs. Whole-section metrics cannot preserve message-to-measurement
+    # attribution, so supply each record's exact measurements and timestamp.
+    payload = {"records": [{**{name: row[name] for name in
+                            ("ref", "request_status", "duration_ms", "timestamp")},
+                            "message": messages[record["event_key"]]
                            if messages is not None else record["message"]}
                            for row, record in zip(metadata, records)],
         "context": {"service": chunk.service, "level": chunk.level, "release": chunk.release},

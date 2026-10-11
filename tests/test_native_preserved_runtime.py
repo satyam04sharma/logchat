@@ -30,8 +30,9 @@ async def test_preserved_intake_refinement_embedding_query_inspection_and_chat(t
                     'important_fields':[field['field_ref'] for field in context['field_catalog'] if field['key'] in {'email','phone','error_code'}],
                     'uncertainties':[]}
             if 'items' in context:return {'sections':[[item['ref'] for item in context['items']]]}
-            return {'selections':[{'evidence_ref':item['evidence_ref'],'reason':'exact_identifier','confidence':1}
-                for cell in context['cells'] for item in cell['candidates']]}
+            assert context['protocol']=='independent-candidate-relevance-v1'
+            assert 'candidate_ref' in context['candidate']
+            return {'label':'exact_identifier','confidence':1}
     monkeypatch.setattr('pipeline.models.LocalModels',LocalModel)
     await configure(tmp_path,model='mock',dimensions=8,content_policy='local_model_compact',chat_model='mock-local')
     store=LocalStore(tmp_path);project=store.create_project('preserved')

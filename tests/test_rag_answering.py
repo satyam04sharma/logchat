@@ -85,6 +85,7 @@ class AssemblyTests(unittest.TestCase):
         self.assertIsNone(result["plan"]["cells"][0]["metrics"])
         self.assertIn("current:boundary_chunk_metrics_excluded", result["gaps"])
         self.assertEqual(result["evidence"][0]["event_count"], 3)
+        self.assertNotIn("Exact reported status distribution", result["answer"])
 
     def test_invented_or_mutated_selected_evidence_and_cross_scope_rejected(self):
         value = context()

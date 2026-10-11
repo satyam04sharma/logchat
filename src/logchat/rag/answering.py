@@ -255,9 +255,9 @@ def assemble_context(context: RemappedContext, *, preserve_content: bool = False
                 "stored_model_summary_with_original_records" if summary else
                               "deterministic_section_projection" if section else "deterministic_template_projection"})
             if chunk.compression_version == COMPACT_VERSION:
-                paragraphs.append(f"{label}: compressed model context “{chunk.summary}” [{chunk.chunk_id}]. Selected fields and exact metrics are retained; original logs were discarded.")
+                paragraphs.append(f"{label}: unverified model summary “{chunk.summary}” [{chunk.chunk_id}]. Selected fields and exact metrics are retained; original logs were discarded.")
             elif summary:
-                paragraphs.append(f"{label}: model summary “{chunk.summary}” [{chunk.chunk_id}]. Supporting original records accompany the cited evidence.")
+                paragraphs.append(f"{label}: unverified model summary “{chunk.summary}” [{chunk.chunk_id}]. Supporting original records accompany the cited evidence.")
             else:
                 noun = "section" if section else "template"
                 paragraphs.append(f"{label}: retained {noun} reports “{chunk.summary}” [{chunk.chunk_id}].")
@@ -265,6 +265,10 @@ def assemble_context(context: RemappedContext, *, preserve_content: bool = False
             measured = (f" Mean duration {metrics['duration_mean_ms']:.3f} ms across {metrics['duration_count']} measured events."
                         if metrics["duration_count"] else " No duration samples occur in these selected chunks.")
             numeric = f"Selected in-window evidence represents {metrics['events']} observed log events.{measured}"
+            statuses = ", ".join(f"{status}: {count}" for status, count in metrics["status_counts"].items()) or "none reported"
+            unreported = metrics["events"] - sum(metrics["status_counts"].values())
+            numeric += (f" Exact reported status distribution across whole selected in-window evidence: {statuses}."
+                        f" Status unreported for {unreported} events.")
             observations.append({"id": "metrics-" + hashlib.sha256(cell.cell_id.encode()).hexdigest()[:24],
                 "kind": "computed_metrics", "cell_id": cell.cell_id, "text": numeric,
                 "evidence_ids": [chunk.chunk_id for chunk in whole], "metrics": metrics})

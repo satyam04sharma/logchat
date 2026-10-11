@@ -53,7 +53,7 @@ async def sections_fixture():
 
 
 class CompactTests(unittest.IsolatedAsyncioTestCase):
-    async def test_model_projection_omits_duplicate_attribution_and_keeps_complete_messages(self):
+    async def test_model_projection_keeps_measurement_attribution_and_complete_messages(self):
         original = await sections_fixture()
         model = CompactModel()
         compact = await compact_summary_batch(original, model)
@@ -61,7 +61,8 @@ class CompactTests(unittest.IsolatedAsyncioTestCase):
         source = records_for_chunk(chunk)
         payload = model.payloads[0]
         self.assertEqual(payload["records"], [
-            {"ref": "e" + str(index), "message": record["message"]}
+            {"ref": "e" + str(index), "message": record["message"], **{
+                key: record[key] for key in ("request_status", "duration_ms", "timestamp")}}
             for index, record in enumerate(source)])
         self.assertEqual(payload["context"], {
             "service": chunk.service, "level": chunk.level, "release": chunk.release})
@@ -87,7 +88,9 @@ class CompactTests(unittest.IsolatedAsyncioTestCase):
         original = await section_batch(batch([event(message=messages[0])]), LocalPartitionModel())
         model = CompactModel("empty_fields")
         compact = await compact_summary_batch(original, model)
-        self.assertEqual(model.payloads[0]["records"], [{"ref": "e0", "message": messages[0]}])
+        source = records_for_chunk(original.chunks[0])[0]
+        self.assertEqual(model.payloads[0]["records"], [{"ref": "e0", "message": messages[0], **{
+            key: source[key] for key in ("request_status", "duration_ms", "timestamp")}}])
         fields = {field["key"]: field["value"]
                   for field in validate_compact_chunk(compact.chunks[0])["important_fields"]}
         self.assertEqual(fields["event_id"], 9007199254740993)

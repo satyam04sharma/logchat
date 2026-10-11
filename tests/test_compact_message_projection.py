@@ -1,11 +1,14 @@
 """Trusted compact views preserve canonical fields and exclude producer-body echoes."""
 from collections import Counter
 from dataclasses import asdict, replace
+from datetime import datetime
 
 import pytest
 
 from connectors.local import normalized_model_message, parse_push_events
-from logchat.rag.sections import (SectionModelError, compact_records_for_chunk,
+from logchat.local.raw_capture import content_digest
+from logchat.rag.sections import (COMPACT_INSTRUCTION, SectionModelError, SummaryConfig,
+    _compact_feasible, _compact_request, _json, compact_records_for_chunk,
     compact_summary_batch, records_for_chunk, section_batch, validate_refinement)
 from tests.test_grouping_projection import prepare, sidecar
 from tests.test_rag_compact import CompactModel
@@ -108,9 +111,121 @@ async def test_independent_requests_never_reuse_prior_attribution_or_metrics():
         assert row["duration_ms"] == events[0].duration_ms
         validate_refinement(original, compact)
     assert model.calls == 2
-    assert payloads[0]["records"] == payloads[1]["records"]
+    assert payloads[0]["records"][0]["message"] == payloads[1]["records"][0]["message"]
+    assert payloads[0]["records"][0]["duration_ms"] == .5
+    assert payloads[1]["records"][0]["duration_ms"] == 50.5
     assert payloads[0]["field_catalog"] != payloads[1]["field_catalog"]
     assert payloads[0]["exact_metrics"] != payloads[1]["exact_metrics"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("projected", [False, True])
+async def test_mixed_status_section_keeps_each_message_measurement_binding(projected):
+    values = [dict(event_id=f"event-{i}",
+        message="Payment incident reported" if i == 0 else "Directory index forbidden",
+        timestamp=f"2026-10-10T00:00:00.{i:03d}Z",
+        duration_ms=5000 if i == 0 else i + .5,
+        request_status=504 if i == 0 else 200) for i in range(33)]
+    events, original = await fixture(values)
+    digests = [content_digest(event) for event in events]
+    assert len(original.chunks) == 1
+    chunk = original.chunks[0]
+    records = records_for_chunk(chunk)
+    candidates = sidecar(events) if projected else None
+    model = CompactModel("empty_fields")
+    compact = await compact_summary_batch(original, model, model_events=candidates)
+    assert model.calls == 1 and len(compact.chunks) == 1
+    payload = model.payloads[0]
+    assert len(payload["records"]) == 33
+    assert payload["exact_metrics"]["status_counts"] == {"200": 32, "504": 1}
+    for supplied, canonical, stored in zip(payload["records"], records,
+            compact_records_for_chunk(compact.chunks[0])):
+        assert set(supplied) == {"ref", "message", "request_status", "duration_ms", "timestamp"}
+        for key in ("ref", "request_status", "duration_ms", "timestamp"):
+            assert supplied[key] == stored[key]
+        for key in ("request_status", "duration_ms", "timestamp"):
+            assert supplied[key] == canonical[key]
+        if "Payment incident" in supplied["message"]:
+            assert supplied["request_status"] == 504 and supplied["duration_ms"] == 5000
+        else:
+            assert "Directory index forbidden" in supplied["message"]
+            assert supplied["request_status"] == 200
+    # Generation and preflight use the same complete bounded request.
+    config = SummaryConfig()
+    messages = {key: normalized_model_message(event) for key, event in candidates.items()} if projected else None
+    expected, schema, _, _ = _compact_request(chunk, records, config, messages)
+    assert payload == expected
+    _compact_feasible(chunk, records, config, messages)
+    serialized = COMPACT_INSTRUCTION + _json(payload) + _json(schema)
+    assert len(serialized) <= config.input_character_budget
+    assert len(serialized.encode()) <= config.input_byte_budget
+    assert "belong only to that" in COMPACT_INSTRUCTION
+    assert "do not establish source adjacency" in COMPACT_INSTRUCTION
+    assert [content_digest(event) for event in events] == digests
+    assert compact.coverage == original.coverage
+    assert compact.event_keys == original.event_keys
+    validate_refinement(original, compact)
+
+
+@pytest.mark.asyncio
+async def test_missing_measurements_remain_null_in_compact_input():
+    _, original = await fixture([dict(value(0), request_status=None, duration_ms=None)])
+    model = CompactModel("empty_fields")
+    await compact_summary_batch(original, model)
+    supplied = model.payloads[0]["records"][0]
+    assert supplied["request_status"] is None and supplied["duration_ms"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("projected", [False, True])
+async def test_separated_auth_runs_keep_timestamps_span_and_work_sum_distinct(projected):
+    # Two 15-event runs with 24 other source events between them. This tests
+    # request fidelity, not model prose or a claim that timestamps prove adjacency.
+    values = [dict(event_id=f"auth-{i}", message="Authentication request rejected",
+        service="auth", timestamp=f"2026-10-10T00:00:00.{i:03d}Z",
+        duration_ms=48 if i == 0 else 51, request_status=401)
+        for i in (*range(15), *range(39, 54))]
+    intervening = [dict(event_id=f"other-{i}", message="Directory request completed",
+        service="web", timestamp=f"2026-10-10T00:00:00.{i:03d}Z",
+        duration_ms=1, request_status=200) for i in range(15, 39)]
+    events, original = await fixture(values + intervening)
+    chunk = next(chunk for chunk in original.chunks if chunk.service == "auth")
+    assert chunk.metrics.event_count == 30
+    records = records_for_chunk(chunk)
+    candidates = sidecar(events) if projected else None
+    messages = {key: normalized_model_message(event) for key, event in candidates.items()} if projected else None
+    config = SummaryConfig()
+    expected, schema, _, _ = _compact_request(chunk, records, config, messages)
+    _compact_feasible(chunk, records, config, messages)
+    model = CompactModel("empty_fields")
+    digests = [content_digest(event) for event in events]
+    compact = await compact_summary_batch(original, model, model_events=candidates)
+    payload = next(payload for payload in model.payloads if payload["context"]["service"] == "auth")
+    assert payload == expected
+    assert payload["exact_metrics"]["duration_sum_ms"] == 1527
+    assert payload["exact_metrics"]["status_counts"] == {"401": 30}
+    assert payload["observed_window"]["span_ms"] == 53
+    timestamps = sorted(datetime.fromisoformat(row["timestamp"]) for row in payload["records"])
+    gaps = [(right - left).total_seconds() * 1000 for left, right in zip(timestamps, timestamps[1:])]
+    assert gaps == [1] * 14 + [25] + [1] * 14
+    assert len(intervening) == 24
+    stored = compact_records_for_chunk(next(chunk for chunk in compact.chunks if chunk.service == "auth"))
+    assert len(stored) == len(records) == len(payload["records"]) == 30
+    for supplied, canonical, retained in zip(payload["records"], records, stored):
+        assert set(supplied) == {"ref", "message", "request_status", "duration_ms", "timestamp"}
+        for key in ("ref", "request_status", "duration_ms", "timestamp"):
+            assert supplied[key] == retained[key]
+        for key in ("request_status", "duration_ms", "timestamp"):
+            assert supplied[key] == canonical[key]
+    assert "consecutive" not in _json(payload) and "adjacency" not in _json(payload)
+    assert "do not establish source adjacency" in COMPACT_INSTRUCTION
+    assert "NOT elapsed wall-clock time" in payload["metric_semantics"]["duration_sum_ms"]
+    serialized = COMPACT_INSTRUCTION + _json(payload) + _json(schema)
+    assert len(serialized) <= config.input_character_budget
+    assert len(serialized.encode()) <= config.input_byte_budget
+    assert [content_digest(event) for event in events] == digests
+    assert compact.coverage == original.coverage and compact.event_keys == original.event_keys
+    validate_refinement(original, compact)
 
 
 @pytest.mark.asyncio
