@@ -62,17 +62,51 @@ async def test_typed_aliases_preserved_and_oversized_late_single_preflights_enti
 
 @pytest.mark.asyncio
 async def test_request_bounds_split_with_complete_source_messages():
+    from dataclasses import replace
+    from unittest.mock import patch
+    from logchat.rag import sections as section_api
+    from pipeline.model_transport import SYSTEM_SAFETY_SUFFIX, model_json
+
     original = await sections([value(i) for i in range(8)])
-    # Include the versioned dictionary instructions while still forcing splits.
-    config = SummaryConfig(input_character_budget=5600)
+    assert len(original.chunks) == 1
+    # Capture the production catalog binding with a pure mock at default bounds.
+    # Measure the projected wire payload and exact schema, not expanded records.
+    control = CompactModel("empty_fields")
+    with patch.object(section_api, "_compact_request", wraps=section_api._compact_request) as factory:
+        await compact_summary_batch(original, control)
+    assert control.calls == 1
+    (chunk, records, default_config, messages), options = factory.call_args
+    assert len(records) == 8
+
+    def request_chars(candidate, rows):
+        payload, schema, _, _ = section_api._compact_request(
+            candidate, rows, default_config, messages, **options)
+        return len(section_api.CATALOG_COMPACT_INSTRUCTION + SYSTEM_SAFETY_SUFFIX
+                   + model_json(payload) + model_json(schema))
+
+    singletons = [section_api.make_chunk(original.batch_id, original.identity,
+        chunk.window, [row], section_api.SECTION_VERSION) for row in records]
+    # Measured singleton maximum 6663, full eight-record request 9491;
+    # their midpoint leaves room for singletons but still requires splitting.
+    config = SummaryConfig(input_character_budget=8077)
+    assert max(request_chars(child, [row]) for child, row in zip(singletons, records)) <= config.input_character_budget
+    assert config.input_character_budget < request_chars(chunk, records)
+    for child, row in zip(singletons, records):
+        _compact_feasible(child, [row], config, messages, **options)
+    with pytest.raises(SectionModelError, match="compact_input_budget_exceeded"):
+        _compact_feasible(chunk, records, config, messages, **options)
+
     model = CompactModel("empty_fields")
     compact = await compact_summary_batch(original, model, config=config)
     assert len(model.payloads) > 1
     assert Counter(row["message"] for payload in model.payloads for row in payload["records"]) == Counter(
         row["message"] for chunk in original.chunks for row in records_for_chunk(chunk))
+    assert [row["message"] for payload in model.payloads for row in payload["records"]] == [
+        row["message"] for row in records]
+    assert [row["event_key"] for child in compact.chunks for row in compact_records_for_chunk(child)] == [
+        row["event_key"] for row in records]
     validate_refinement(original, compact)
     # Oversized evidence is rejected independently of a generous request budget.
-    from dataclasses import replace
     chunk = original.chunks[0]
     with pytest.raises(SectionModelError, match="compact_input_budget_exceeded"):
         _compact_feasible(chunk, [dict(records_for_chunk(chunk)[0], source="s" * 16000)],
