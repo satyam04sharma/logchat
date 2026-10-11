@@ -307,12 +307,44 @@ class SectionModelError(ModelUnavailable):
         super().__init__(category + ":" + phase)
 
 
-def _request(chunks):
+def _matching_model_event(record, model_events):
+    """Accept only a sidecar matching every typed canonical record field."""
+    from pipeline.types import LogEvent
+
+    event = model_events.get(record["event_key"]) if model_events is not None else None
+    if isinstance(event, LogEvent):
+        try:
+            canonical = {name: getattr(event, name) for name in _FIELDS
+                         if name not in {"event_key", "timestamp"}}
+            canonical.update(event_key=record["event_key"], timestamp=utc(event.ts).isoformat())
+            # JSON comparison preserves int/float/bool distinctions.
+            if _json(canonical) == _json(record):
+                return event
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            pass
+    return None
+
+
+def _grouping_messages(batch, model_events):
+    """Call-local views bound to every typed canonical field, never source overrides."""
+    from connectors.local import normalized_model_message
+
+    views = {}
+    for chunk in batch.chunks:
+        for record in records_for_chunk(chunk):
+            event = _matching_model_event(record, model_events)
+            views[record["event_key"]] = (normalized_model_message(event)
+                if event is not None else record["message"])
+    return views
+
+
+def _request(chunks, messages=None):
     refs = ["e" + str(index) for index in range(len(chunks))]
     # Grouping needs the complete messages, not replay hashes or duplicated
     # attribution fields. Compatibility is enforced before this projection;
     # assembly still copies every original record field from the source chunk.
-    payload = {"items": [{"ref": ref, "messages": [record["message"] for record in decode_records(chunk.summary)]}
+    payload = {"items": [{"ref": ref, "messages": [messages[record["event_key"]] if messages is not None
+                         else record["message"] for record in decode_records(chunk.summary)]}
                          for ref, chunk in zip(refs, chunks)]}
     schema = {"type": "object", "additionalProperties": False, "required": ["sections"], "properties": {
         "sections": {"type": "array", "minItems": 1, "maxItems": len(refs), "items": {
@@ -424,7 +456,7 @@ async def _validated_partition(model, payload, schema, refs, config, *, proposed
         raise SectionModelError("section_invalid_partition", phase + "_repair", repair_attempted=True) from None
 
 
-async def section_batch(batch, local_model, *, config=None):
+async def section_batch(batch, local_model, *, config=None, model_events=None):
     """At most three calls/page: partition, review, one shared membership repair.
 
     Every call uses the same local model and bounded request/output budgets.
@@ -437,6 +469,7 @@ async def section_batch(batch, local_model, *, config=None):
     validate_batch(batch, version=INTAKE_VERSION)
     if not batch.chunks:
         return batch
+    messages = _grouping_messages(batch, model_events)
     if getattr(local_model, "local_only", False) is not True or getattr(local_model, "preserve_content", False) is not True:
         raise ModelUnavailable("local_preserving_section_model_required")
     model_name = getattr(local_model, "chat_model", None)
@@ -460,7 +493,7 @@ async def section_batch(batch, local_model, *, config=None):
 
     output = []
     for compatible in grouped.values():
-        # Exact message equality is sufficient only inside this compatibility
+        # Exact validated view equality is sufficient only inside this compatibility
         # cell: grouping deliberately sees no per-event metadata or metrics.
         # Keep all originals outside the model projection and expand the chosen
         # membership before size packing. Never generalize numeric/ID values.
@@ -468,7 +501,7 @@ async def section_batch(batch, local_model, *, config=None):
         representatives = {}
         for chunk in sorted(compatible, key=lambda chunk: chunk.chunk_id):
             records = decode_records(chunk.summary)
-            signature = tuple(record["message"] for record in records)
+            signature = tuple(messages[record["event_key"]] for record in records)
             if signature not in representatives:
                 representatives[signature] = chunk
                 cohorts[chunk.chunk_id] = []
@@ -478,7 +511,7 @@ async def section_batch(batch, local_model, *, config=None):
             page = []
             for chunk in remaining[:config.max_items]:
                 trial = page + [chunk]
-                payload, schema, refs = _request(trial)
+                payload, schema, refs = _request(trial, messages)
                 # Reserve review and one repair while choosing pages. The
                 # largest repair schema permits every label for every ref;
                 # singleton proposals reserve the largest proposal envelope.
@@ -495,7 +528,7 @@ async def section_batch(batch, local_model, *, config=None):
                 page = trial
             if not page:
                 raise ModelUnavailable("section_model_input_budget_exceeded")
-            payload, schema, refs = _request(page)
+            payload, schema, refs = _request(page, messages)
             sections, repair_used, normalized = await partition(payload, schema, refs)
             if config.coherence_review and any(len(section) > 1 for section in sections):
                 sections, repair_used, review_normalized = await partition(payload, schema, refs,
@@ -900,7 +933,7 @@ def _correlation_field(key):
         ("_id", "_email", "_phone", "_phone_number", "_code"))
 
 
-def _compact_request(chunk, records, config):
+def _compact_request(chunk, records, config, messages=None):
     metadata = [{"ref": "e" + str(index), **{name: record[name] for name in _COMPACT_METADATA}}
                 for index, record in enumerate(records)]
     catalogs = [_source_fields(record) for record in records]
@@ -930,7 +963,14 @@ def _compact_request(chunk, records, config):
     if len(required) > 64:
         raise SectionModelError("compact_input_budget_exceeded", "compact_summary")
     field_catalog = [{"field_ref": "f" + str(index), **merged[key]} for index, key in enumerate(ordered[:256])]
-    payload = {"records": [{**row, "message": record["message"]} for row, record in zip(metadata, records)],
+    # Model-only projection: durable attribution is assembled from metadata,
+    # never from model output. Validated views keep complete producer text,
+    # refs and ordering; catalogs above remain canonical. Do not repeat replay keys,
+    # source IDs or measurements already represented by exact_metrics.
+    payload = {"records": [{"ref": row["ref"], "message": messages[record["event_key"]]
+                           if messages is not None else record["message"]}
+                           for row, record in zip(metadata, records)],
+        "context": {"service": chunk.service, "level": chunk.level, "release": chunk.release},
         "field_catalog": field_catalog, "exact_metrics": asdict(chunk.metrics),
         "observed_window": {"start": chunk.first_event_at.isoformat(), "end": chunk.last_event_at.isoformat(),
             "span_ms": (chunk.last_event_at - chunk.first_event_at).total_seconds() * 1000},
@@ -947,7 +987,56 @@ def _compact_request(chunk, records, config):
     return payload, schema, metadata, catalogs
 
 
-async def compact_summary_batch(batch, local_model, *, config=None):
+def _compact_feasible(chunk, records, config, messages=None):
+    """Check current request and mandatory canonical evidence bounds."""
+    payload, schema, metadata, _ = _compact_request(chunk, records, config, messages)
+    serialized = COMPACT_INSTRUCTION + _json(payload) + _json(schema)
+    if len(serialized) > config.input_character_budget or len(serialized.encode()) > config.input_byte_budget:
+        raise SectionModelError("compact_input_budget_exceeded", "compact_summary")
+    fields = [{key: field[key] for key in ("key", "value", "event_refs")}
+              for field in payload["field_catalog"]]
+    required = [field for field in fields if _correlation_field(field["key"])]
+    # Mandatory source evidence must fit even when the model selects nothing.
+    # Optional selections and actual prose/uncertainties retain the independent
+    # post-generation output guard; feasibility never truncates their values.
+    evidence = _json({"version": COMPACT_EVIDENCE_VERSION, "records": metadata,
+        "important_fields": required, "uncertainties": [_OMISSION_NOTICE]})
+    if len(evidence) > MAX_COMPACT_EVIDENCE_CHARS or len(evidence.encode()) > 64000:
+        raise SectionModelError("compact_input_budget_exceeded", "compact_summary")
+
+
+
+def _pack_compact_sections(batch, config, messages=None):
+    """Split only model-selected sections; preflight all singles before generation."""
+    output = []
+    for chunk in batch.chunks:
+        records = records_for_chunk(chunk)
+
+        def candidate(rows):
+            packed = make_chunk(batch.batch_id, batch.identity, chunk.window, rows, SECTION_VERSION)
+            return replace(packed, loss_notes=chunk.loss_notes)
+
+        packed = []
+        for record in records:
+            trial = packed + [record]
+            try:
+                _compact_feasible(candidate(trial), trial, config, messages)
+            except SectionModelError:
+                if not packed:
+                    raise
+                output.append(candidate(packed))
+                _compact_feasible(candidate([record]), [record], config, messages)
+                packed = [record]
+            else:
+                packed = trial
+        if packed:
+            output.append(chunk if len(packed) == len(records) else candidate(packed))
+    refined = replace(batch, chunks=tuple(output))
+    validate_refinement(batch, refined)
+    return refined
+
+
+async def compact_summary_batch(batch, local_model, *, config=None, model_events=None):
     """Abstract transient source into bounded prose/selected fields; retain no raw records."""
     config = config or SummaryConfig()
     validate_batch(batch)
@@ -960,10 +1049,25 @@ async def compact_summary_batch(batch, local_model, *, config=None):
     model_name = getattr(local_model, "chat_model", None)
     if not isinstance(model_name, str) or not model_name or len(model_name) > 160:
         raise SectionModelError("compact_model_identity_required", "compact_summary")
-    output = []
+    messages = _grouping_messages(batch, model_events)
+    # Full producer bodies must not become durable prose merely because the
+    # normalizer appended fields to the canonical message. Keep these guards
+    # call-local, bound to the same current records as the projected messages.
+    from connectors.local import validated_normalization_origin
+    excluded_messages = {}
     for chunk in batch.chunks:
+        for record in records_for_chunk(chunk):
+            bodies = {record["message"], messages[record["event_key"]]}
+            event = _matching_model_event(record, model_events)
+            origin = validated_normalization_origin(event) if event is not None else None
+            if origin is not None:
+                bodies.add(event.message[:origin.prefix_chars])
+            excluded_messages[record["event_key"]] = bodies
+    packed_batch = _pack_compact_sections(batch, config, messages)
+    output = []
+    for chunk in packed_batch.chunks:
         records = records_for_chunk(chunk)
-        payload, schema, metadata, catalogs = _compact_request(chunk, records, config)
+        payload, schema, metadata, catalogs = _compact_request(chunk, records, config, messages)
         serialized = COMPACT_INSTRUCTION + _json(payload) + _json(schema)
         if len(serialized) > config.input_character_budget or len(serialized.encode()) > config.input_byte_budget:
             raise SectionModelError("compact_input_budget_exceeded", "compact_summary")
@@ -1002,8 +1106,9 @@ async def compact_summary_batch(batch, local_model, *, config=None):
                     or any(not isinstance(item, str) or not item.strip() or len(item) > 240 for item in uncertainties)):
                 raise ValueError("compact_invalid_output")
             for text in [value["summary"], *uncertainties]:
-                if any(text.strip() == record["message"].strip()
-                       or (len(record["message"]) >= 80 and record["message"] in text) for record in records):
+                if any(text.strip() == message.strip()
+                       or (len(message) >= 80 and message in text)
+                       for record in records for message in excluded_messages[record["event_key"]]):
                     raise ValueError("compact_invalid_output")
             evidence = _json({"version": COMPACT_EVIDENCE_VERSION, "records": metadata,
                 "important_fields": fields, "uncertainties": list(dict.fromkeys([*uncertainties, _OMISSION_NOTICE]))})

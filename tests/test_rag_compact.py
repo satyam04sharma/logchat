@@ -53,6 +53,49 @@ async def sections_fixture():
 
 
 class CompactTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_projection_omits_duplicate_attribution_and_keeps_complete_messages(self):
+        original = await sections_fixture()
+        model = CompactModel()
+        compact = await compact_summary_batch(original, model)
+        chunk = original.chunks[0]
+        source = records_for_chunk(chunk)
+        payload = model.payloads[0]
+        self.assertEqual(payload["records"], [
+            {"ref": "e" + str(index), "message": record["message"]}
+            for index, record in enumerate(source)])
+        self.assertEqual(payload["context"], {
+            "service": chunk.service, "level": chunk.level, "release": chunk.release})
+        evidence = validate_compact_chunk(compact.chunks[0])
+        for index, (record, stored) in enumerate(zip(source, evidence["records"])):
+            self.assertEqual(stored, {"ref": "e" + str(index), **{
+                key: value for key, value in record.items() if key not in {"message", "fingerprint"}}})
+        # Compare the complete serialized request, not just its row count.
+        previous = {**payload, "records": [
+            {**stored, "message": record["message"]}
+            for stored, record in zip(evidence["records"], source)]}
+        previous.pop("context")
+        self.assertLess(len(_json(payload)), len(_json(previous)))
+        self.assertLess(len(_json(payload).encode()), len(_json(previous).encode()))
+        self.assertEqual(compact.event_keys, original.event_keys)
+        self.assertEqual(compact.coverage, original.coverage)
+        validate_refinement(original, compact)
+
+    async def test_model_projection_preserves_ids_numbers_and_rare_fields_in_producer_text(self):
+        messages = ["Operation 987654321 for resource raw-uuid-73 failed " + json.dumps({
+            "event_id": 9007199254740993, "id": "distinct-alias", "quantity": 2,
+            "error_code": "RareUnicode\u03bb", "traceId": "trace-73"})]
+        original = await section_batch(batch([event(message=messages[0])]), LocalPartitionModel())
+        model = CompactModel("empty_fields")
+        compact = await compact_summary_batch(original, model)
+        self.assertEqual(model.payloads[0]["records"], [{"ref": "e0", "message": messages[0]}])
+        fields = {field["key"]: field["value"]
+                  for field in validate_compact_chunk(compact.chunks[0])["important_fields"]}
+        self.assertEqual(fields["event_id"], 9007199254740993)
+        self.assertEqual(fields["id"], "distinct-alias")
+        self.assertEqual(fields["error_code"], "RareUnicode\u03bb")
+        self.assertEqual(fields["traceId"], "trace-73")
+        validate_refinement(original, compact)
+
     async def test_abstractive_summary_keeps_exact_selected_fields_but_no_raw_support(self):
         original = await sections_fixture()
         model = CompactModel()
@@ -141,16 +184,20 @@ class CompactTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(compact.chunks[0].metrics, original.chunks[0].metrics)
         validate_refinement(original, compact)
 
-    async def test_too_many_required_correlations_reject_before_model_without_silent_loss(self):
+    async def test_required_correlations_split_without_silent_loss(self):
         events = [event(index, "request failed " + json.dumps({f"resource{index}_{n}_id": f"value-{index}-{n}"
                   for n in range(30)})) for index in range(3)]
         original = await section_batch(batch(events), LocalPartitionModel())
         model = CompactModel("empty_fields")
-        with self.assertRaises(SectionModelError) as raised:
-            await compact_summary_batch(original, model)
-        self.assertEqual(raised.exception.category, "compact_input_budget_exceeded")
-        self.assertEqual(model.calls, 0)
-        self.assertIsNone(original.chunks[0].compact_evidence)
+        compact = await compact_summary_batch(original, model)
+        self.assertGreater(len(compact.chunks), 1)
+        rows = [row for chunk in compact.chunks for row in compact_records_for_chunk(chunk)]
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            index = int(row["event_id"].split("-")[-1])
+            fields = {item["key"]: item["value"] for item in row["important_fields"]}
+            self.assertEqual(fields, {f"resource{index}_{n}_id": f"value-{index}-{n}" for n in range(30)})
+        validate_refinement(original, compact)
 
     async def test_source_catalog_cannot_truncate_a_correlation_key_silently(self):
         values = {f"attribute_{number:03}": number for number in range(70)}

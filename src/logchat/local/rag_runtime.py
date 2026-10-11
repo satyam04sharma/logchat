@@ -10,16 +10,93 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import timedelta
 import json
+import logging
 import os
 from pathlib import Path
 import threading
 import time
+import uuid
 
 from logchat.rag.contracts import EmbeddingSpec, SourceIdentity, TimeWindow
 from logchat.rag.scheduler import SQLiteSchedulerStore
 
 
 CONFIG_FILE = "rag.json"
+
+
+class _IntakeDiagnostics:
+    """Constant-size timing state, with no source identities or event content."""
+
+    def __init__(self):
+        self.identifier = uuid.uuid4().hex
+        self.started = self.stage_started = time.monotonic()
+        self.stage = "admission"
+        self.calls = {"chunking": 0, "summary": 0}
+        self.status = "failed"
+
+    def emit(self, kind, *, warning=False, **values):
+        try:
+            logging.getLogger(__name__).log(logging.WARNING if warning else logging.INFO,
+                "native_intake %s", json.dumps({"intake": self.identifier, "kind": kind,
+                    "stage": self.stage, **values}, sort_keys=True))
+        except Exception:
+            pass  # Optional telemetry must never replace the pipeline outcome.
+
+    def advance(self, stage):
+        now = time.monotonic()
+        self.emit("stage_completed", seconds=round(now - self.stage_started, 6))
+        self.stage, self.stage_started = stage, now
+
+    def finish(self):
+        now = time.monotonic()
+        self.emit("finished", warning=self.status != "ok", status=self.status,
+            seconds=round(now - self.started, 6), stage_seconds=round(now - self.stage_started, 6),
+            calls=self.calls)
+
+
+class _TimedIntakeModel:
+    """Delegate unchanged requests to the configured shared generation model."""
+
+    def __init__(self, model, diagnostics, role):
+        self.model, self.diagnostics, self.role = model, diagnostics, role
+
+    def __getattr__(self, name):
+        return getattr(self.model, name)
+
+    async def generate(self, instruction, payload, schema):
+        diagnostics = self.diagnostics
+        diagnostics.calls[self.role] += 1
+        call = diagnostics.calls[self.role]
+        started = time.monotonic()
+        diagnostics.emit("model_started", role=self.role, call=call)
+        status = "failed"
+        try:
+            result = await self.model.generate(instruction, payload, schema)
+            status = "ok"
+            return result
+        except asyncio.CancelledError:
+            status = "cancelled"
+            raise
+        finally:
+            diagnostics.emit("model_finished", warning=status != "ok", role=self.role,
+                call=call, status=status, seconds=round(time.monotonic() - started, 6))
+
+
+class _SilentIntakeDiagnostics:
+    """Continue unchanged model work when timing initialization is unavailable."""
+
+    def __init__(self):
+        self.calls = {"chunking": 0, "summary": 0}
+        self.status = "failed"
+
+    def emit(self, *args, **kwargs):
+        pass
+
+    def advance(self, stage):
+        pass
+
+    def finish(self):
+        pass
 
 
 class _FairIntakeSlot:
@@ -272,7 +349,12 @@ class NativeRAGRuntime:
 
     async def _ingest_reserved(self, project_id, source_id, events):
         from pipeline.models import ModelUnavailable
+        diagnostics = None
         try:
+            try:
+                diagnostics = _IntakeDiagnostics()
+            except Exception:
+                diagnostics = _SilentIntakeDiagnostics()
             from logchat.rag.builder import event_key, prepare_preserved_batch
             from logchat.rag.sections import section_batch, compact_summary_batch, validate_compact_batch
             if len(events) > MAX_INTAKE_EVENTS:
@@ -302,6 +384,7 @@ class NativeRAGRuntime:
                              if state != "completed")
             if pending and unfinished >= 64:
                 raise ModelUnavailable("intake_backpressure_retry_required")
+            diagnostics.emit("admitted", events=len(events), pending=len(pending))
             async with asyncio.timeout(300):
                 for offset in range(0, len(pending), 400):
                     if unfinished + len(jobs) >= 64:
@@ -310,16 +393,28 @@ class NativeRAGRuntime:
                     window = TimeWindow(min(e.ts for e in group), max(e.ts for e in group) + timedelta(microseconds=1))
                     # Originals exist only in this bounded call's memory. Nothing
                     # enters SQLite before both local generation stages finish.
+                    diagnostics.advance("prepare")
                     transient = prepare_preserved_batch(identity, group, window)
-                    sectioned = await section_batch(transient, self.model_profile.generation("chunking"))
-                    compact = await compact_summary_batch(sectioned, self.model_profile.generation("summary"))
+                    model_events = {event_key(identity, event.event_id): event for event in group}
+                    diagnostics.advance("grouping")
+                    sectioned = await section_batch(transient, _TimedIntakeModel(
+                        self.model_profile.generation("chunking"), diagnostics, "chunking"),
+                        model_events=model_events)
+                    diagnostics.emit("sectioned", sections=len(sectioned.chunks))
+                    diagnostics.advance("compact")
+                    compact = await compact_summary_batch(sectioned, _TimedIntakeModel(
+                        self.model_profile.generation("summary"), diagnostics, "summary"),
+                        model_events=model_events)
+                    diagnostics.advance("validate_enqueue")
                     validate_compact_batch(compact)
                     jobs.append(self.scheduler.enqueue(compact,
                         event_digests={key: digests[key] for key in compact.event_keys}))
+            diagnostics.status = "ok"
             return {"accepted": len(events), "deduplicated": len(events) - len(pending), "jobs": jobs,
                     "state": "durably_prepared", "retrieval": "semantic_hybrid", "indexed": False,
                     "original_events_stored": False}
         except asyncio.CancelledError:
+            diagnostics.status = "cancelled"
             raise
         except Exception as error:
             category = str(error) if str(error) in {
@@ -337,6 +432,11 @@ class NativeRAGRuntime:
             raise unavailable from None
         finally:
             _INTAKE_SLOT.release()
+            if diagnostics is not None:
+                try:
+                    diagnostics.finish()
+                except Exception:
+                    pass
 
     def _ingest_redacted(self, project_id: str, source_id: str, events) -> dict:
         from logchat.rag.builder import prepare_batch

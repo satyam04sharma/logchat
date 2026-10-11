@@ -1,0 +1,78 @@
+"""Canonical compact packing contracts; fixture models only."""
+from collections import Counter
+from dataclasses import asdict
+
+import pytest
+
+from connectors.local import parse_push_events
+from logchat.rag.sections import (SectionModelError, SummaryConfig, _compact_feasible,
+    compact_records_for_chunk, compact_summary_batch, records_for_chunk, section_batch,
+    validate_refinement)
+from tests.test_grouping_projection import prepare, sidecar
+from tests.test_rag_compact import CompactModel
+from tests.test_rag_sections import LocalPartitionModel
+
+
+async def sections(values):
+    events = parse_push_events(values, preserve_fields=True)
+    return await section_batch(prepare(events), LocalPartitionModel(), model_events=sidecar(events))
+
+
+def value(index, **extra):
+    return dict(event_id=f"event-{index}", id=f"event-{index}",
+        message="PRIVATE_BODY operation failed", timestamp="2026-10-10T00:00:00Z",
+        duration_ms=index + .5, request_status=504 if index == 32 else 200, **extra)
+
+
+@pytest.mark.asyncio
+async def test_dual_alias_64_boundary_exact_records_metrics_and_current_requests():
+    original = await sections([value(i) for i in range(33)])
+    assert len(original.chunks) == 1
+    model = CompactModel("empty_fields")
+    compact = await compact_summary_batch(original, model)
+    assert sorted(chunk.metrics.event_count for chunk in compact.chunks) == [1, 32]
+    assert sorted(len(payload["field_catalog"]) for payload in model.payloads) == [2, 64]
+    rows = [row for chunk in compact.chunks for row in compact_records_for_chunk(chunk)]
+    assert Counter(row["event_id"] for row in rows) == Counter(f"event-{i}" for i in range(33))
+    for row in rows:
+        assert {item["key"]: item["value"] for item in row["important_fields"]} == {
+            "event_id": row["event_id"], "id": row["event_id"]}
+    for chunk, payload in zip(compact.chunks, model.payloads):
+        assert payload["exact_metrics"] == asdict(chunk.metrics)
+        assert all(len(field["event_refs"]) == 1 for field in payload["field_catalog"])
+    assert "PRIVATE_BODY" not in str(asdict(compact))
+    validate_refinement(original, compact)
+
+
+@pytest.mark.asyncio
+async def test_typed_aliases_preserved_and_oversized_late_single_preflights_entire_batch():
+    original = await sections([value(0), value(1, **{f"resource_{i}_id": i for i in range(65)})])
+    model = CompactModel("empty_fields")
+    with pytest.raises(SectionModelError, match="compact_input_budget_exceeded"):
+        await compact_summary_batch(original, model)
+    assert model.calls == 0
+    original = await sections([dict(value(0), id=False), dict(value(1), id=7.0)])
+    compact = await compact_summary_batch(original, CompactModel("empty_fields"))
+    rows = [row for chunk in compact.chunks for row in compact_records_for_chunk(chunk)]
+    aliases = {row["event_id"]: next(field["value"] for field in row["important_fields"] if field["key"] == "id") for row in rows}
+    assert aliases["event-0"] is False
+    assert type(aliases["event-1"]) is float and aliases["event-1"] == 7.0
+    validate_refinement(original, compact)
+
+
+@pytest.mark.asyncio
+async def test_request_bounds_split_with_complete_source_messages():
+    original = await sections([value(i) for i in range(8)])
+    config = SummaryConfig(input_character_budget=5000)
+    model = CompactModel("empty_fields")
+    compact = await compact_summary_batch(original, model, config=config)
+    assert len(model.payloads) > 1
+    assert Counter(row["message"] for payload in model.payloads for row in payload["records"]) == Counter(
+        row["message"] for chunk in original.chunks for row in records_for_chunk(chunk))
+    validate_refinement(original, compact)
+    # Oversized evidence is rejected independently of a generous request budget.
+    from dataclasses import replace
+    chunk = original.chunks[0]
+    with pytest.raises(SectionModelError, match="compact_input_budget_exceeded"):
+        _compact_feasible(chunk, [dict(records_for_chunk(chunk)[0], source="s" * 16000)],
+                          replace(config, input_character_budget=32000))

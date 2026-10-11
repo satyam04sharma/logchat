@@ -7,7 +7,7 @@ this is not a forensic-erasure promise for filesystem snapshots or backups.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 import hashlib
 import json
@@ -19,9 +19,10 @@ import tempfile
 import time
 from uuid import uuid4
 
+from connectors.local import event_wire_fields, validated_normalization_origin
 from logchat.rag.builder import event_key
 from logchat.rag.contracts import SourceIdentity, utc
-from pipeline.types import LogEvent
+from pipeline.types import LogEvent, NormalizationOrigin
 
 DEFAULT_MAX_BYTES = 100 * 1024 * 1024
 DEFAULT_RETENTION_SECONDS = 24 * 60 * 60
@@ -124,7 +125,10 @@ def _encoded_event(event):
         raise ValueError("capture_invalid_event")
     if event.request_status is not None and (type(event.request_status) is not int or not 100 <= event.request_status <= 599):
         raise ValueError("capture_invalid_event")
-    value = asdict(event)
+    value = event_wire_fields(event)
+    origin = validated_normalization_origin(event)
+    if origin is not None:
+        value["normalization_origin"] = asdict(origin)
     value["ts"] = utc(event.ts).isoformat()
     return _json(value)
 
@@ -316,7 +320,16 @@ class CaptureSpool:
                 size += row["payload_bytes"]
                 value = json.loads(row["payload"])
                 value["ts"] = datetime.fromisoformat(value["ts"])
-                events.append(LogEvent(**value))
+                raw_origin = value.pop("normalization_origin", None)
+                event = LogEvent(**value)
+                if isinstance(raw_origin, dict):
+                    try:
+                        candidate = replace(event, normalization_origin=NormalizationOrigin(**raw_origin))
+                        if validated_normalization_origin(candidate) is not None:
+                            event = candidate
+                    except TypeError:
+                        pass
+                events.append(event)
                 keys.append(row["event_key"])
                 connection.execute("UPDATE raw_events SET lease_token=?,lease_until=? WHERE event_key=?",
                                    (token, now + lease_seconds, row["event_key"]))
