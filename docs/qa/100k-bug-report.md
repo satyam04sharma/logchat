@@ -31,7 +31,7 @@ Current release status: **not ready to publish as a validated 100K demo**. The l
 | Auth compaction exceeds the intake deadline after exact packing | Fresh cycle: 27 physical requests, 15 completed, request 16 canceled at 300 seconds; lossless input-factoring correction delegated |
 | Failed-run checker aborts while reconciling a canceled document response | New private checker candidate preserves strict failures and distinguishes returned/canceled/unattempted requests; independent review pending |
 | Server shutdown leaves diagnostic ledgers unsealed | New private checker candidate seals before Uvicorn forwards SIGTERM; independent review pending |
-| Published incident quotes omit the operational subject | Original failed cycle web publication retains timeout outcome but lacks the operation quote; catalog-versus-selection diagnosis pending |
+| Published incident quotes omit the operational subject | Original failed cycle offers exact incident-bound operation/outcome choices, but selected web/worker quotes omit useful operation context; generic selector correction delegated |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
@@ -507,3 +507,6 @@ The first measurement probe incorrectly used the generation proof's fit method a
 ## Operational context missing from published incident quotes
 
 A pure, read-only check of the original failed fresh cycle's 23 published web chunks finds one incident member with source quotes. Those quotes retain the timeout outcome but omit the operational subject required for useful incident context. No new query, generation or source-membership re-audit occurred in this partial check; the original cycle remains failed. Exact source catalogs and saved model selections need comparison to distinguish a missing eligible proposal from a model-selection omission. The reviewed message dictionary conserves choices and does not itself establish that the selector preserves useful operational context. The new checker activation remains blocked while this distinct quality finding is diagnosed and corrected.
+
+
+Independent saved-request replay confirms catalog construction did not exclude the operational subject. The web incident request had 51 bound choices, including 29 incident-eligible choices, five complete operation proposals, eleven outcome proposals and two covering both. Selected incident quotes omitted the operation; published quote hashes equal the actual model selections. The worker singleton offered five operation proposals, eight outcome proposals and two combined choices, but its four selected quotes omit both complete anchors. Worker was prepared but not published. Auth offered all expected categories, but its incident request was never submitted; no auth selector failure is claimed. Choices remain available in the dictionary payload after exact expansion. GNHF is correcting the generic selection policy; fresh model usefulness remains unproved.
