@@ -340,7 +340,7 @@ class SectionTests(unittest.IsolatedAsyncioTestCase):
                 if self.mode == "repair" and "proposed_sections" not in payload:
                     return {"sections": [refs[:-1]]}
                 return result
-        original = batch([event(index, "処理失敗 " * 90) for index in range(6)])
+        original = batch([event(index, "処理失敗 " * 90 + str(index)) for index in range(6)])
         config = SectionConfig(max_items=5, input_character_budget=5000, input_byte_budget=6000)
         for mode in ("together", "repair"):
             model = CaptureRequests(mode)

@@ -445,6 +445,19 @@ async def section_batch(batch, local_model, *, config=None):
     grouped = defaultdict(list)
     for chunk in batch.chunks:
         grouped[_compatibility(chunk)].append(chunk)
+    # Reuse only identical model requests within this bounded transient batch.
+    # Grouping sees messages, not event attribution or measurements. Partition
+    # refs are page-local; assembly below always reads the current page's exact
+    # records. Never reuse summary prose or retain this cache across intake calls.
+    partitions = {}
+
+    async def partition(payload, schema, refs, *, proposed=None, repair_used=False):
+        key = _json([payload, schema, refs, proposed, repair_used])
+        if key not in partitions:
+            partitions[key] = await _validated_partition(local_model, payload, schema, refs, config,
+                                                        proposed=proposed, repair_used=repair_used)
+        return partitions[key]
+
     output = []
     for compatible in grouped.values():
         remaining = sorted(compatible, key=lambda chunk: chunk.chunk_id)
@@ -470,10 +483,10 @@ async def section_batch(batch, local_model, *, config=None):
             if not page:
                 raise ModelUnavailable("section_model_input_budget_exceeded")
             payload, schema, refs = _request(page)
-            sections, repair_used, normalized = await _validated_partition(local_model, payload, schema, refs, config)
+            sections, repair_used, normalized = await partition(payload, schema, refs)
             if config.coherence_review and any(len(section) > 1 for section in sections):
-                sections, repair_used, review_normalized = await _validated_partition(local_model, payload, schema, refs, config,
-                                                                                      proposed=sections, repair_used=repair_used)
+                sections, repair_used, review_normalized = await partition(payload, schema, refs,
+                                                                         proposed=sections, repair_used=repair_used)
                 normalized = normalized or review_normalized
             lookup = dict(zip(refs, page))
             # Canonical group/member order makes output stable for an equivalent partition.
