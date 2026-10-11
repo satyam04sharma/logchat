@@ -112,7 +112,8 @@ class RemapperTests(unittest.IsolatedAsyncioTestCase):
         config = RemapConfig(input_byte_budget=48000)
         for question in ("Inspect person_42@example.com", "person_42@example.com",
                          "Inspect person@example.com", "Inspect +44 7700 900222",
-                         "Inspect +1-202-555-0102", "Inspect person_42@example.com and +1-202-555-0102"):
+                         "Inspect +1-202-555-0102", "email:person_42@example.com",
+                         "Inspect person_42@example.com and +1-202-555-0102"):
             with self.subTest(question=question):
                 model = Model()
                 checked = await remap(retrieval((item,), question=question), model,
@@ -126,6 +127,22 @@ class RemapperTests(unittest.IsolatedAsyncioTestCase):
                 model = Model()
                 checked = await remap(retrieval((item,), question=question), model,
                                      preserve_content=True, config=config)
+                self.assertFalse(checked.selected)
+                self.assertFalse(model.calls)
+
+    async def test_prose_colon_and_explicit_label_do_not_extend_exact_identifier(self):
+        source = candidate("fault", "ERROR-42 connection rejected")
+        for question in ("ERROR-42: what happened?", "Inspect ERROR-42", "code:ERROR-42"):
+            with self.subTest(question=question):
+                model = Model()
+                checked = await remap(retrieval((source,), question=question), model)
+                self.assertEqual(len(checked.selected), 1)
+                self.assertEqual(len(model.calls), 1)
+        for question in ("QUANTUM_NONEXISTENT_92731: what happened?", "code:UNKNOWN_FAULT_68124",
+                         "ERROR-42 and UNKNOWN_FAULT_68124: what happened?"):
+            with self.subTest(question=question):
+                model = Model({"selections": [selection(confidence=1.0)]})
+                checked = await remap(retrieval((source,), question=question), model)
                 self.assertFalse(checked.selected)
                 self.assertFalse(model.calls)
 
@@ -151,18 +168,21 @@ class RemapperTests(unittest.IsolatedAsyncioTestCase):
                        metrics=record_metrics((row,)), first_event_at=START, last_event_at=START,
                        compression_version="local-model-section-v1"))
         config = RemapConfig(input_byte_budget=48000)
-        for question in ("Investigate AUTH-42 and ABSENT_FAULT_72", "Inspect AUTH-420", "Inspect auth-42"):
+        for question in ("Investigate AUTH-42 and ABSENT_FAULT_72", "Inspect AUTH-420", "Inspect auth-42",
+                         "AUTH-42 and QUANTUM_NONEXISTENT_92731: what happened?"):
             with self.subTest(question=question):
                 model = Model({"selections": [selection(confidence=1.0)]})
                 checked = await remap(retrieval((item,), question=question), model,
                                      preserve_content=True, config=config)
                 self.assertFalse(checked.selected)
                 self.assertFalse(model.calls)
-        model = Model()
-        checked = await remap(retrieval((item,), question="Inspect AUTH-42"), model,
-                             preserve_content=True, config=config)
-        self.assertEqual(len(checked.selected), 1)
-        self.assertEqual(len(model.calls), 1)
+        for question in ("Inspect AUTH-42", "AUTH-42: what happened?", "code:AUTH-42"):
+            with self.subTest(question=question):
+                model = Model()
+                checked = await remap(retrieval((item,), question=question), model,
+                                     preserve_content=True, config=config)
+                self.assertEqual(len(checked.selected), 1)
+                self.assertEqual(len(model.calls), 1)
 
     async def test_valid_empty_selection_is_no_evidence_without_arbitrary_top_neighbor(self):
         result = await remap(retrieval(question="How did lunar tides change?"), Model({"selections": []}))

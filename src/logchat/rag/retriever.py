@@ -234,12 +234,16 @@ def _requested_identifiers(question):
     mixed-case/alphanumeric codes are exact. Uppercase topics, versions and HTTP
     status codes remain semantic. Source matching is case-sensitive.
     """
-    stripped = question.strip().rstrip("?!.")
+    # A prose trailing colon introduces a question, rather than extending an
+    # ID. Explicit labels are syntax, while URI schemes and internal value
+    # colons remain part of the complete token.
+    token_question = re.sub(r"(?<!\S)(?:code|id|identifier|email|phone):(?=\S)", "", question, flags=re.IGNORECASE)
+    stripped = token_question.strip().rstrip("?!.:")
     requested = []
     # Include the full address/path alphabet rather than splitting at @ or /.
     # Question length is already bounded at the public entry points.
-    for match in re.finditer(r"\+\d(?:[\d -]*\d)?|[A-Za-z0-9+][\w.@:/+\-]*", question):
-        token = match.group().rstrip(".")
+    for match in re.finditer(r"\+\d(?:[\d -]*\d)?|[A-Za-z0-9+][\w.@:/+\-]*", token_question):
+        token = match.group().rstrip(".:")
         if token.startswith("REDACTED_") or re.fullmatch(
                 r"(?:v\d+(?:\.\d+)*(?:[-+][\w.-]+)?|\d+(?:\.\d+)+(?:[-+][\w.-]+)?|HTTP[-_]\d{3})", token, re.IGNORECASE):
             continue
@@ -289,7 +293,7 @@ def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content
             target[identifier] = hit
     identifiers = _identifiers(question)
     requested = _requested_identifiers(question)
-    standalone = requested if len(requested) == 1 and requested[0] == question.strip().rstrip("?!.") else ()
+    standalone = requested if len(requested) == 1 and requested[0] == question.strip().rstrip("?!.:") else ()
     candidates, rejected = [], 0
     for identifier, chunk in chunks.items():
         vector, lex = vectors.get(identifier), lexical.get(identifier)

@@ -113,6 +113,13 @@ class RetrieverTests(unittest.IsolatedAsyncioTestCase):
         from logchat.rag.retriever import _requested_identifiers
         cases = {
             "Inspect person_42@example.com": ("person_42@example.com",),
+            "ERROR-42: what happened?": ("ERROR-42",),
+            "code:ERROR-42": ("ERROR-42",),
+            "Inspect email:person_42@example.com": ("person_42@example.com",),
+            "Inspect phone:+44 7700 900222": ("+44 7700 900222",),
+            "Inspect rack_42:child": ("rack_42:child",),
+            "Inspect https://host.test:8443/path_42": ("https://host.test:8443/path_42",),
+            "Inspect https://host.test:8443/code:ERROR-42": ("https://host.test:8443/code:ERROR-42",),
             "Inspect absent@example.com": ("absent@example.com",),
             "Inspect +1-202-555-0102": ("+1-202-555-0102",),
             "Inspect +44 7700 900222": ("+44 7700 900222",),
