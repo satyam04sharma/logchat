@@ -460,7 +460,20 @@ async def section_batch(batch, local_model, *, config=None):
 
     output = []
     for compatible in grouped.values():
-        remaining = sorted(compatible, key=lambda chunk: chunk.chunk_id)
+        # Exact message equality is sufficient only inside this compatibility
+        # cell: grouping deliberately sees no per-event metadata or metrics.
+        # Keep all originals outside the model projection and expand the chosen
+        # membership before size packing. Never generalize numeric/ID values.
+        cohorts = {}
+        representatives = {}
+        for chunk in sorted(compatible, key=lambda chunk: chunk.chunk_id):
+            records = decode_records(chunk.summary)
+            signature = tuple(record["message"] for record in records)
+            if signature not in representatives:
+                representatives[signature] = chunk
+                cohorts[chunk.chunk_id] = []
+            cohorts[representatives[signature].chunk_id].extend(records)
+        remaining = sorted(representatives.values(), key=lambda chunk: chunk.chunk_id)
         while remaining:
             page = []
             for chunk in remaining[:config.max_items]:
@@ -491,7 +504,7 @@ async def section_batch(batch, local_model, *, config=None):
             lookup = dict(zip(refs, page))
             # Canonical group/member order makes output stable for an equivalent partition.
             for section in sorted((tuple(sorted(part)) for part in sections)):
-                records = [record for ref in section for record in decode_records(lookup[ref].summary)]
+                records = [record for ref in section for record in cohorts[lookup[ref].chunk_id]]
                 records.sort(key=lambda row: (row["timestamp"], row["event_key"]))
                 packed = []
                 for record in records:

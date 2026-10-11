@@ -564,7 +564,7 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
             async def generate(self, *args):
                 if self.calls == 1: raise RuntimeError("PRIVATE_SECOND_SECTION")
                 return await super().generate(*args)
-        separate = await section_batch(batch([event(message="small failure"), event(1, "small failure")]), LocalPartitionModel("separate"))
+        separate = await section_batch(batch([event(message="small failure"), event(1, "small failure on another operation")]), LocalPartitionModel("separate"))
         with self.assertRaises(SectionModelError): await summarize_batch(separate, FailsSecond(quote="small failure"))
         self.assertTrue(all(chunk.compression_version == SECTION_VERSION and chunk.supporting_records is None for chunk in separate.chunks))
 
