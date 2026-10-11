@@ -90,3 +90,50 @@ The preserved 400-key/digest replay must remain unchanged and synthetic child
 counts explicitly labeled until actual parity. Nomic parity, effective context,
 lossless embedding refinement and all integration/acceptance gates remain
 separate work. No real model/tokenizer execution belongs in these offline tests.
+
+## Asynchronous runtime owner checkpoint
+
+`pipeline.native_tokenizer.runtime.VocabularyRuntime` now owns the bridge in one
+isolated Python subprocess per explicit async context. Its absolute monotonic
+deadline is at most 300 seconds and includes startup, file hashing, compilation,
+load, lock waiting and counts. Idle expiry, cancellation and native stalls kill
+and reap the owned process group (including a compiler child); orderly close
+calls the C free operation. Cancellation is not implemented with an abandoned
+thread. Repeated close is idempotent. A terminated owner cannot be reused.
+
+The owner copies hash-verified pinned headers, license, manifest and bridge into
+a private temporary directory, invokes the fixed system C compiler without a
+shell, and deletes the build at close. There is no shared executable cache.
+The isolated child receives a minimal environment without loader injection,
+compiler flags, Python path, credentials or user-site configuration. Native
+stdout/stderr are discarded; IPC returns only bounded counts or fixed errors.
+No compilation or native loading occurs on import. The runtime Python source is
+included through normal package discovery; all C inputs retain their exact bytes.
+
+The internal `Asset` inputs carry expected SHA-256 identities for the library,
+model and an explicitly supplied dependency closure. Files must be regular,
+absolute and free of symlink components. The worker hashes them before loading
+and checks inode/size/mtime/ctime revisions before and after load and every count.
+It serializes native access and passes explicit special-token flags and capacity.
+The primitive can count exact complete prefixed embedding strings with either
+flag pair, but has no embedding-context or Nomic identity admission authority.
+
+**This is still not a production capability or a default adapter.** A caller must
+not derive approved identities by hashing arbitrary discovered files. The next
+provider binding must establish reviewed same-host assets and dependency closure,
+trusted store resolution and protection against path substitution during native
+open (these revision checks detect changes but do not eliminate that race), exact
+manifest/config/template/request identities, pinned server BOS semantics and
+lazy `LocalModels` ownership. Missing-file diagnostics are currently internal
+fixed errors; the binding must translate them into actionable compatibility
+errors. Linux has a build branch only; no additional platform coverage or real
+library compatibility is claimed. No default constructor or saved actual parity
+has been tested by this checkpoint.
+
+The new `tests/test_vocab_runtime.py` uses only an inert compiled C fixture,
+whose synthetic count encodes byte length and explicit flags. It proves process
+reuse, deterministic normal free, cancellation during process creation and native
+work, idle/in-flight deadlines, revision/digest/source rejection, bounded input,
+worker death and private-build cleanup. These values are not real token counts,
+GGUF validation, fit or performance evidence. Original generation/embedding
+requests, recipes and saved 400-record replay remain unchanged.
