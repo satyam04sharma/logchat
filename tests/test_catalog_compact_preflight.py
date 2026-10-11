@@ -47,7 +47,7 @@ async def test_catalog_request_preserves_complete_old_input_and_explicit_new_sch
     assert set(schema['properties']) == set(schema['required']) == {'selections', 'important_fields'}
     assert schema['additionalProperties'] is False
     assert schema['properties']['selections']['maxItems'] == 4
-    assert schema['properties']['selections']['items']['properties']['phrase_ref']['enum'] == [p[0] for p in new['phrase_catalog']]
+    assert schema['properties']['selections']['items']['enum'] == [p[0] for p in new['phrase_catalog']]
     assert 'uniqueItems' not in schema['properties']['selections']
     assert 'source_phrases' in old_schema['properties']
     assert _compact_request(chunk, records, config, views) == (old, old_schema, old_metadata, old_fields)

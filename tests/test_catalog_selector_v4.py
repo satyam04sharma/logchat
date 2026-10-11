@@ -1,8 +1,7 @@
-"""Pure explicit-role controls; intentions never authenticate usefulness or facts."""
+"""Pure v4 catalog selector controls: plain phrase refs, presentation order, bounds."""
 from logchat.rag.compact_input import expand_compact_input
 from copy import deepcopy
 from dataclasses import replace
-from itertools import permutations
 import json
 
 import jsonschema
@@ -10,7 +9,7 @@ import pytest
 
 from logchat.rag.compact_bounds import compact_reservations
 from logchat.rag.sections import SummaryConfig, _compact_request, records_for_chunk
-from logchat.rag.source_catalog import SELECTION_ROLES, select_catalog_observations
+from logchat.rag.source_catalog import select_catalog_observations
 from logchat.rag.source_observations import _json, _protect_bodies, observation_embedding, select_observations
 from pipeline.models import _validate_schema
 from tests.test_catalog_compact_preflight import fixture
@@ -36,8 +35,8 @@ def response(*selections):
     return {'selections': list(selections), 'important_fields': []}
 
 
-def choice(ref, *roles):
-    return {'phrase_ref': ref, 'roles': list(roles)}
+def choice(ref):
+    return ref
 
 
 @pytest.mark.asyncio
@@ -47,8 +46,7 @@ async def test_model_chosen_combined_and_complementary_rare_quotes(combined):
     offered = dict((text, ref) for ref, text in payload['phrase_catalog'])
     texts = (['reconciliation job exhausted retry budget'] if combined else
              ['reconciliation job', 'exhausted retry budget'])
-    selected = ([choice(offered[texts[0]], 'operation_subject', 'outcome')] if combined else
-                [choice(offered[texts[0]], 'operation_subject'), choice(offered[texts[1]], 'outcome')])
+    selected = [choice(offered[text]) for text in texts]
     value = response(*selected)
     original = deepcopy(value)
     jsonschema.Draft7Validator(schema).validate(value)
@@ -59,11 +57,11 @@ async def test_model_chosen_combined_and_complementary_rare_quotes(combined):
     assert all(o['event_refs'] == ['e32'] and o['exact_metrics']['event_count'] == 1 for o in observations)
     legacy = {'source_phrases': [{'record_ref': 'e32', 'text': text} for text in texts], 'important_fields': []}
     assert (observations, fields) == select_observations(legacy, records, views, bodies, [], output_budget=8000)
-    # Even an inaccurate model intention cannot add facts or change source membership.
-    assert select(response(*(choice(s['phrase_ref'], 'context') for s in selected))) == (observations, fields)
     durable = _json(observation_embedding(observations, records, fields)) + _json(observations)
-    assert all(role not in durable for role in SELECTION_ROLES)
     assert 'roles' not in durable and 'phrase_ref' not in durable
+    # The rare record's complete phrases are presented before repeated templates.
+    first = payload['phrase_catalog'][0][1]
+    assert first in 'rare reconciliation job exhausted retry budget after delay' and ' ' in first
     _protect_bodies([o['text'] for o in observations], [*views.values(), *(b for bs in bodies.values() for b in bs)])
 
 
@@ -72,10 +70,12 @@ async def test_every_original_choice_and_membership_is_selectable_and_empty_is_v
     payload, schema, records, views, bodies, catalog, select = await contract()
     before = deepcopy((records, views, bodies, catalog))
     bound = catalog.bind(records, views, bodies)
-    assert payload['phrase_catalog'] == [[p['phrase_ref'], p['text']] for p in bound]
-    assert schema['properties']['selections']['items']['properties']['phrase_ref']['enum'] == [p['phrase_ref'] for p in bound]
+    # Presentation reorders but never adds, drops or alters a bound choice.
+    assert sorted(payload['phrase_catalog']) == sorted([p['phrase_ref'], p['text']] for p in bound)
+    assert len(payload['phrase_catalog']) == len(bound)
+    assert schema['properties']['selections']['items']['enum'] == [p[0] for p in payload['phrase_catalog']]
     for item in bound:
-        value = response(choice(item['phrase_ref'], 'context'))
+        value = response(choice(item['phrase_ref']))
         jsonschema.Draft7Validator(schema).validate(value)
         observations, _ = select(value)
         assert observations[0]['event_refs'] == item['event_refs']
@@ -86,19 +86,15 @@ async def test_every_original_choice_and_membership_is_selectable_and_empty_is_v
     _protect_bodies([p['text'] for p in bound], [*views.values(), *(b for bs in bodies.values() for b in bs)])
 
 
-BAD_CHOICES = [None, False, 0, 'p0', [], {}, {'phrase_ref': 'p0'},
-    {'roles': ['context']}, {'phrase_ref': 'p0', 'roles': ['context'], 'extra': []},
-    *[choice(ref, 'context') for ref in ('unknown', 'P0', None, False, 0, [], {})],
-    *[{'phrase_ref': 'p0', 'roles': roles} for roles in
-      (None, False, 0, 'context', {}, [], ['unknown'], ['Context'], [True], [0], [None], [[]], [{}],
-       ['context', 'context'], ['operation_subject', 'outcome', 'context', 'context'], ['context', 'unknown'])]]
+BAD_CHOICES = [None, False, 0, [], {}, {'phrase_ref': 'p0'}, {'phrase_ref': 'p0', 'roles': ['context']},
+    'unknown', 'P0', 'p0 ', ['p0']]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('bad', BAD_CHOICES)
 async def test_every_malformed_original_choice_rejects_even_after_three_known_duplicates(bad):
     _, schema, _, _, _, _, select = await contract(['operation completed after delay'])
-    valid = choice('p0', 'context')
+    valid = choice('p0')
     for value in (response(bad), response(valid, valid, valid, bad)):
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.Draft7Validator(schema).validate(value)
@@ -110,13 +106,12 @@ async def test_every_malformed_original_choice_rejects_even_after_three_known_du
 async def test_exact_four_dedup_first_occurrence_only_after_complete_validation():
     payload, schema, _, _, _, _, select = await contract(['operation completed after delay'])
     a, b = [p[0] for p in payload['phrase_catalog'][:2]]
-    value = response(choice(b, 'outcome'), choice(a, 'operation_subject'),
-                     choice(b, 'context'), choice(a, *SELECTION_ROLES))
+    value = response(b, a, b, a)
     original = deepcopy(value)
     jsonschema.Draft7Validator(schema).validate(value)
     assert select(value) == select(response(*value['selections'][:2]))
     assert value == original
-    for bad in (response(*value['selections'], choice(a, 'context')),
+    for bad in (response(*value['selections'], a),
                 {'phrase_refs': [a], 'important_fields': []},
                 {'source_phrases': [], 'important_fields': []},
                 {**value, 'phrase_refs': []}, {'selections': []},
@@ -129,7 +124,7 @@ async def test_exact_four_dedup_first_occurrence_only_after_complete_validation(
 
 
 @pytest.mark.asyncio
-async def test_complete_serialized_role_envelopes_and_historical_reservations():
+async def test_complete_serialized_ref_envelopes_and_historical_reservations():
     payload, schema, records, views, bodies, catalog, _ = await contract(['alpha\\"beta réconciliation 😀 after delay'])
     # Synthetic refs stress serializer escaping and UTF-8 without changing text,
     # membership or catalog eligibility. Production refs are shorter ASCII IDs.
@@ -139,11 +134,9 @@ async def test_complete_serialized_role_envelopes_and_historical_reservations():
                'field_catalog': [{'field_ref': 'f\\"😀', 'key': 'key', 'value': '😀\\"', 'event_refs': ['e0']}],
                'required_field_refs': []}
     bounds = compact_reservations(payload, records, SummaryConfig())
-    role_arrays = [list(p) for n in range(1, 4) for p in permutations(SELECTION_ROLES, n)]
     sizes = []
-    for roles in role_arrays:
-        for count in range(5):
-            value = {'selections': [choice(escaped_ref, *roles)] * count, 'important_fields': ['f\\"😀'] * 64}
+    for count in range(5):
+            value = {'selections': [choice(escaped_ref)] * count, 'important_fields': ['f\\"😀'] * 64}
             observations, fields = select_catalog_observations(value, records, views, bodies,
                 ['f\\"😀'], catalog, output_budget=8000)
             assert fields == ['f\\"😀'] and len(observations) == bool(count)
@@ -160,36 +153,39 @@ async def test_complete_serialized_role_envelopes_and_historical_reservations():
 
 
 @pytest.mark.asyncio
-async def test_intentions_disappear_from_complete_durable_chunks_and_historical_notes_read():
+async def test_v4_durable_chunks_match_and_historical_notes_read():
     from dataclasses import asdict
     from logchat.rag.sections import compact_summary_batch, embedding_text, validate_compact_chunk
     from tests.test_compact_v3_activation import Selector
 
-    class Intentions(Selector):
-        def __init__(self, roles):
-            super().__init__(['reconciliation job', 'exhausted retry budget'])
-            self.roles = roles
-
-        async def generate(self, *args):
-            value = await super().generate(*args)
-            for selected, roles in zip(value['selections'], self.roles):
-                selected['roles'] = roles
-            return value
-
     messages = ['routine directory listing served successfully'] * 32 + [
         'rare reconciliation job exhausted retry budget after delay']
     source, _, _ = await fixture(messages)
-    first = await compact_summary_batch(source, Intentions([['operation_subject'], ['outcome']]))
-    second = await compact_summary_batch(source, Intentions([['context'], list(SELECTION_ROLES)]))
-    assert asdict(first) == asdict(second)
+    first = await compact_summary_batch(source, Selector(['reconciliation job', 'exhausted retry budget']))
     chunk = first.chunks[0]
     evidence = validate_compact_chunk(chunk)
     assert evidence['version'] == 'compact-evidence-v3'
+    assert 'selector_protocol:source-catalog-selector-v4' in chunk.loss_notes
     serialized = json.dumps(asdict(first), default=str) + embedding_text(chunk)
-    assert '"roles"' not in serialized and 'operation_subject' not in serialized
-    for version in ('v1', 'v2'):
+    assert '"roles"' not in serialized
+    for version in ('v1', 'v2', 'v3'):
         historical = replace(chunk, loss_notes=tuple(
-            note.replace('source-catalog-selector-v3', 'source-catalog-selector-' + version)
+            note.replace('source-catalog-selector-v4', 'source-catalog-selector-' + version)
             for note in chunk.loss_notes))
         assert validate_compact_chunk(historical) == evidence
         assert embedding_text(historical) == embedding_text(chunk)
+
+
+def test_presentation_order_is_a_rare_first_permutation():
+    from logchat.rag.sections import _presentation_order
+    common = ['e0', 'e1', 'e2']
+    bound = [{'phrase_ref': 'p0', 'text': 'Directory', 'event_refs': common},
+             {'phrase_ref': 'p1', 'text': 'Directory index forbidden', 'event_refs': common},
+             {'phrase_ref': 'p2', 'text': 'timed out', 'event_refs': ['e3']},
+             {'phrase_ref': 'p3', 'text': 'out\nStructured', 'event_refs': ['e3']},
+             {'phrase_ref': 'p4', 'text': 'payment gateway connection timed out', 'event_refs': ['e3']},
+             {'phrase_ref': 'p5', 'text': 'client value', 'event_refs': common}]
+    ordered = [p['phrase_ref'] for p in _presentation_order(bound)]
+    # Rare group lead, then common leads; contained or multi-line fragments last.
+    assert ordered == ['p4', 'p1', 'p5', 'p0', 'p2', 'p3']
+    assert _presentation_order([]) == []

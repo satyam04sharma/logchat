@@ -24,7 +24,5 @@ def select_topics(payload, topics, *, fields=False, allow_absent_topics=False):
 
 
 def role_selections(refs):
-    """Translate identical mock choices; no selection/ranking change."""
-    if not isinstance(refs, list):
-        return refs
-    return [{'phrase_ref': ref, 'roles': ['context']} for ref in refs]
+    """V4 selections are the identical plain refs; no selection/ranking change."""
+    return refs

@@ -100,7 +100,7 @@ class SizedModel(CompactModel):
     async def preflight_generation(self, instruction, payload, schema):
         assert self.calls == 0
         assert instruction == CATALOG_COMPACT_INSTRUCTION
-        assert schema['properties']['selections']['items']['properties']['phrase_ref']['enum'] == [p[0] for p in payload['phrase_catalog']]
+        assert schema['properties']['selections']['items']['enum'] == [p[0] for p in payload['phrase_catalog']]
         keys = tuple(r['timestamp'] for r in expand_compact_input(payload)['records'])
         self.checked.append(keys)
         return len(keys) <= self.limit and not (len(keys) == 1 and keys[0] == self.bad_key)

@@ -17,9 +17,9 @@ def compact_reservations(payload, records, config):
     if "input_projection" in payload:
         payload = expand_compact_input(payload)
     protocol = payload.get('selector_protocol')
-    if 'selector_protocol' in payload and protocol not in ('source-catalog-selector-v1', 'source-catalog-selector-v2', SELECTOR_PROTOCOL):
+    if 'selector_protocol' in payload and protocol not in ('source-catalog-selector-v1', 'source-catalog-selector-v2', 'source-catalog-selector-v3', SELECTOR_PROTOCOL):
         raise ValueError('unknown_compact_selector_protocol')
-    catalog = payload['phrase_catalog'] if protocol in ('source-catalog-selector-v1', 'source-catalog-selector-v2', SELECTOR_PROTOCOL) else None
+    catalog = payload['phrase_catalog'] if protocol in ('source-catalog-selector-v1', 'source-catalog-selector-v2', 'source-catalog-selector-v3', SELECTOR_PROTOCOL) else None
     fields = payload['field_catalog']
     required = set(payload['required_field_refs'])
     slots = 64 - len(required)
@@ -31,7 +31,7 @@ def compact_reservations(payload, records, config):
     def field_array(byte, semantic=False, refs_only=False):
         # V2/V3 reserve the original incoming list, before known-ref deduplication.
         # Historical v1 and durable/embedding arrays retain distinct-field bounds.
-        if refs_only and protocol in ('source-catalog-selector-v2', SELECTOR_PROTOCOL):
+        if refs_only and protocol in ('source-catalog-selector-v2', 'source-catalog-selector-v3', SELECTOR_PROTOCOL):
             largest = max((cost(f["field_ref"], byte) for f in fields), default=0)
             return 2 + 64 * (largest + 1) - 1 if fields else 2
         def item(field):
@@ -86,7 +86,7 @@ def compact_reservations(payload, records, config):
                 'records': records, 'important_fields': [], 'source_observations': []}
     embedding = observation_embedding([], records, [])
     embedding['summary'] = ''
-    selection_key = ('selections' if protocol == SELECTOR_PROTOCOL else
+    selection_key = ('selections' if protocol in ('source-catalog-selector-v3', SELECTOR_PROTOCOL) else
                      'source_phrases' if catalog is None else 'phrase_refs')
     selector = {selection_key: [], 'important_fields': []}
     phrase_count = MAX_PHRASES if catalog is None else min(MAX_PHRASES, len(catalog))
@@ -101,8 +101,8 @@ def compact_reservations(payload, records, config):
         selector_item = cost({'record_ref': longest_ref, 'text': ''}, byte) - 2 + phrase
         if catalog is not None:
             selector_item = max((cost(item[0], byte) for item in catalog), default=0)
-            if protocol == SELECTOR_PROTOCOL:
-                # Every valid role array fits the full distinct-role envelope.
+            if protocol == 'source-catalog-selector-v3':
+                # Every valid historical role array fits the full distinct-role envelope.
                 selector_item += cost({'phrase_ref': '', 'roles': list(SELECTION_ROLES)}, byte) - 2
         # Final canonical rendering is an acceptance predicate: reserve its cap,
         # not a worst escaped phrase combination that that predicate rejects.

@@ -86,9 +86,10 @@ async def test_request_bounds_split_with_complete_source_messages():
 
     singletons = [section_api.make_chunk(original.batch_id, original.identity,
         chunk.window, [row], section_api.SECTION_VERSION) for row in records]
-    # Measured singleton maximum 6663, full eight-record request 9491;
-    # their midpoint leaves room for singletons but still requires splitting.
-    config = SummaryConfig(input_character_budget=8077)
+    # The midpoint of the measured singleton maximum and full eight-record request
+    # leaves room for singletons but still requires splitting.
+    single = max(request_chars(child, [row]) for child, row in zip(singletons, records))
+    config = SummaryConfig(input_character_budget=(single + request_chars(chunk, records)) // 2)
     assert max(request_chars(child, [row]) for child, row in zip(singletons, records)) <= config.input_character_budget
     assert config.input_character_budget < request_chars(chunk, records)
     for child, row in zip(singletons, records):

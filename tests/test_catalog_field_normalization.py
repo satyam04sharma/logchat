@@ -65,7 +65,7 @@ async def test_actual_shape_all_seven_choices_order_and_memberships_survive():
     assert repeated[:2] == (payload, schema)
     body = generation_body('pure-mock', CATALOG_COMPACT_INSTRUCTION, payload, schema)
     assert model_json(body) == model_json(generation_body('pure-mock', CATALOG_COMPACT_INSTRUCTION, *repeated[:2]))
-    assert payload['selector_protocol'] == SELECTOR_PROTOCOL == 'source-catalog-selector-v3'
+    assert payload['selector_protocol'] == SELECTOR_PROTOCOL == 'source-catalog-selector-v4'
     assert body['format'] == schema
     assert request_digest(body) == request_digest(generation_body(
         'pure-mock', CATALOG_COMPACT_INSTRUCTION, *repeated[:2]))
@@ -147,11 +147,14 @@ async def test_active_response_uses_sent_schema_and_required_union_is_not_trimme
         async def generate(self, instruction, payload, schema):
             self.calls.append((instruction, deepcopy(payload), deepcopy(schema)))
             refs = [f['field_ref'] for f in expand_compact_input(payload)['field_catalog']]
-            if union_count == 33:
-                selected = (refs[:7] * 5)[:33]
-            else:
-                selected = [r for r in refs if r not in payload['required_field_refs']]
-                selected += selected[:64 - len(selected)]
+            required = payload['required_field_refs']
+            selected = [r for r in refs if r not in required]
+            if union_count == 65:
+                # A non-conforming adapter may ignore the sent schema; the code
+                # union guard still rejects 65 distinct fields.
+                return {'selections': [], 'important_fields': selected}
+            # Fill every incoming optional slot with exact known repeats.
+            selected += selected[:64 - len(required) - len(selected)]
             value = {'selections': [], 'important_fields': selected}
             return _validate_schema(value, schema)
     model = Fields([])
