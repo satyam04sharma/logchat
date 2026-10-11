@@ -31,7 +31,9 @@ class CompactModel:
             if witness:
                 phrases = [{"record_ref": witness["ref"], "text": phrase}]
                 break
-        result = {"source_phrases": phrases, "important_fields": fields}
+        from tests.catalog_selector import select_topics
+        result = select_topics(payload, [item['text'] for item in phrases])
+        result['important_fields'] = fields
         if self.mode == "empty_fields": result["important_fields"] = []
         if self.mode == "invented": result["important_fields"][0] = "f999"
         if self.mode == "renamed": result["important_fields"][0] = "error_code"

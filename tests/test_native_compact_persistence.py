@@ -52,10 +52,12 @@ class Generation:
         if "items" in context:
             return {"sections": [[item["ref"] for item in context["items"]]]}
         assert "records" in context
-        return {"source_phrases": [{"record_ref": row["ref"], "text": "Request failed"}
-                                  for row in context["records"][:1] if "Request failed" in row["message"]],
-                "important_fields": [field["field_ref"] for field in context["field_catalog"]
-                                     if field["key"] == "error_code"]}
+        from tests.catalog_selector import select_topics
+        result = select_topics(context, ['Request failed'])
+        result['important_fields'] = [field['field_ref'] for field in context['field_catalog']
+                                     if field['key'] == 'error_code']
+        return result
+
 
 
 @pytest_asyncio.fixture

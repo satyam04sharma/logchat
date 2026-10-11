@@ -12,6 +12,11 @@ from logchat.rag.source_observations import (
 
 
 def compact_reservations(payload, records, config):
+    from logchat.rag.source_catalog import SELECTOR_PROTOCOL
+    protocol = payload.get('selector_protocol')
+    if 'selector_protocol' in payload and protocol != SELECTOR_PROTOCOL:
+        raise ValueError('unknown_compact_selector_protocol')
+    catalog = payload['phrase_catalog'] if protocol == SELECTOR_PROTOCOL else None
     fields = payload['field_catalog']
     required = set(payload['required_field_refs'])
     slots = 64 - len(required)
@@ -32,6 +37,8 @@ def compact_reservations(payload, records, config):
         return 2 + sum(selected) - bool(selected)
 
     def phrase_cost(byte):
+        if catalog is not None:
+            return max((cost(item[1], byte) for item in catalog), default=2)
         # Every accepted phrase is a contiguous <=120-character source substring.
         # A rolling additive JSON cost safely includes escaping and UTF-8; strings
         # are not normalized. Max over views, not an impossible concatenation.
@@ -71,20 +78,26 @@ def compact_reservations(payload, records, config):
                 'records': records, 'important_fields': [], 'source_observations': []}
     embedding = observation_embedding([], records, [])
     embedding['summary'] = ''
-    selector = {'source_phrases': [], 'important_fields': []}
+    selector = {'source_phrases' if catalog is None else 'phrase_refs': [], 'important_fields': []}
+    phrase_count = MAX_PHRASES if catalog is None else min(MAX_PHRASES, len(catalog))
+    # Exact redundant references are allowed, but never expand into additional
+    # observations. Even a one-item catalog can receive four incoming refs.
+    incoming_count = MAX_PHRASES if catalog is None or catalog else 0
     bounds = {}
     for byte, suffix in ((False, 'chars'), (True, 'bytes')):
         phrase = phrase_cost(byte)
         expanded = cost(observation, byte) - cost('', byte) + phrase + float_extra
         semantic = cost(semantic_observation, byte) - cost('', byte) + phrase + float_extra
         selector_item = cost({'record_ref': longest_ref, 'text': ''}, byte) - 2 + phrase
+        if catalog is not None:
+            selector_item = max((cost(item[0], byte) for item in catalog), default=0)
         # Final canonical rendering is an acceptance predicate: reserve its cap,
         # not a worst escaped phrase combination that that predicate rejects.
         summary = config.summary_character_budget * (4 if byte else 1)
         bounds['evidence_' + suffix] = (cost(evidence, byte) - 4 + field_array(byte)
-                                        + 2 + MAX_PHRASES * (expanded + 1) - 1)
+                                        + 2 + phrase_count * (expanded + 1) - bool(phrase_count))
         bounds['embedding_' + suffix] = (cost(embedding, byte) - 6 + summary + field_array(byte, semantic=True)
-                                         + 2 + MAX_PHRASES * (semantic + 1) - 1)
+                                         + 2 + phrase_count * (semantic + 1) - bool(phrase_count))
         bounds['selector_' + suffix] = (cost(selector, byte) - 4 + field_array(byte, refs_only=True)
-                                        + 2 + MAX_PHRASES * (selector_item + 1) - 1)
+                                        + 2 + incoming_count * (selector_item + 1) - bool(incoming_count))
     return bounds

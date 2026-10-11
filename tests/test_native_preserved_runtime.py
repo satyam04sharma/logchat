@@ -1,3 +1,4 @@
+from tests.catalog_selector import select_topics
 import asyncio,json
 from datetime import datetime,timedelta,timezone
 import pytest
@@ -27,8 +28,8 @@ async def test_preserved_intake_refinement_embedding_query_inspection_and_chat(t
         def __init__(self,**kwargs):pass
         async def generate(self,instruction,context,schema):
             if 'records' in context:
-                assert set(schema['properties']) == {'source_phrases', 'important_fields'}
-                return {'source_phrases':[{'record_ref':context['records'][0]['ref'], 'text':'Session failure'}],
+                assert set(schema['properties']) == {'phrase_refs', 'important_fields'}
+                return {**select_topics(context, ['Session failure']),
                     'important_fields':[field['field_ref'] for field in context['field_catalog'] if field['key'] in {'email','phone','error_code'}]}
             if 'items' in context:return {'sections':[[item['ref'] for item in context['items']]]}
             assert context['protocol']=='independent-candidate-relevance-v1'

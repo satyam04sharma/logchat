@@ -8,25 +8,26 @@ this route. This protocol is not actual-model or native acceptance.
 
 ## Model selection contract
 
-The entire fresh response must have exactly these two keys:
+Fresh production uses `source-catalog-selector-v1`:
 
 ```json
 {
-  "source_phrases": [{"record_ref": "e0", "text": "exact source phrase"}],
+  "phrase_refs": ["p0"],
   "important_fields": ["f0"]
 }
 ```
 
-There may be zero to four phrases, each nonblank and at most 120 Unicode
-characters. Each selector has exactly `record_ref` and `text`; its phrase must
-be a contiguous, case-sensitive substring of the nominated authenticated current
-source view. Duplicate phrase text is rejected, including nominations from
-different witnesses. Field selections must be distinct supplied catalog IDs,
-with at most 64 entries in the union of selected and required correlation refs.
-The request declares the required refs and this union limit. The serialized whole response must fit the caller's
-existing output budget. Extra keys, prose, model metrics, invalid references,
-invalid types, altered text and overflow fail closed. No retry or semantic
-fallback is provided by these helpers.
+The request supplies a lossless `phrase_catalog` table of `[phrase_ref, exact
+text]` rows. It includes the complete original records and typed field catalog.
+The model selects at most four supplied refs; every incoming ref is validated
+before exact repeated refs are normalized. Extra keys, wrong types and unknown
+refs reject the whole output. Field refs remain distinct and their union with
+required correlation refs must contain at most 64 entries. No free-text fallback,
+retry, replacement prose or budget increase is used.
+
+The historical free-text `source_phrases` decoder remains available at its direct
+validation seam. It still rejects duplicate texts, body echoes and invalid saved
+responses. Fresh dispatch does not reinterpret those responses as catalog refs.
 
 The integration caller must authenticate current views before calling the
 selector, with exactly the canonical section's local refs in current order.
@@ -216,3 +217,66 @@ limits remain 6 candidates/cell, 3 selected/cell, 8 globally, 8 classification
 calls and the shared absolute 60-second deadline. All transport/output limits
 and strict independent positive-label/confidence requirements remain unchanged;
 negative, invalid, cancelled or timed-out classification supplies no fallback.
+
+## Active catalog transport and preflight
+
+`compact_summary_batch` builds one call-local catalog from all authenticated
+current views and canonical/producer/projection exclusions before packing.
+Packing, all preflights, every fresh request and the strict known-ref decoder
+receive that same catalog. All resulting singletons must pass before generation.
+Only capacity failures permit splitting; binding errors abort. Catalog failures
+have body-free error categories. No raw sidecar is durable. New chunks record
+`selector_protocol:source-catalog-selector-v1` in loss notes; historical evidence,
+rendering, hashes, embedding recipes and replay are unchanged.
+
+Proposal grammar enumerates exact one-to-six-word Unicode windows at every
+position, bounded to 120 characters. A word ending in `()` retains that exact
+operation punctuation. Identical text has one physical ref and full exact
+membership. At most 65,536 proposals and 4,096 catalog texts are allowed; overflow
+rejects rather than trims. The complete global union still passes the unchanged
+all-body/all-occurrence privacy predicate, so every selection subset stays safe.
+The final atomic selected-union guard remains an independent defense.
+
+Gap planning uses this generic hierarchy before phrase admission:
+
+- Bounded parsed JSON key/leaf/object gap alternatives, eligible only when leaves
+  occur in the complete typed field catalog. Exact original leaf-content spans
+  supply structured proposals; decoding checks eligibility and never constructs
+  a quote absent from source. Structured-value coverage precedes generic pattern
+  coverage, so an unrelated prefix cannot mask lost useful values. Parsing has
+  independent 65,536-character, 4,096-token and depth32 bounds; exhaustion rejects.
+  Structurally identifier-shaped tokens are the next preference. No alternative
+  removes original records, fields or complete model input.
+- Existing case-insensitive connective gaps (`a an the and or but as at by for
+  from in into of on to with without after before during through while`) when the
+  body also contains content words. Negation `not` and `no` remains content.
+- Otherwise, lexical positions containing terms repeated across the most distinct
+  source patterns. Positions are ranked by corpus multiword-window loss, remaining
+  contiguous windows and a declared positional tie: preserve the prefix for a
+  single pattern, the suffix for multiple patterns.
+
+At most four global assignments are evaluated. Their objective, in order, is
+covered patterns, retained two/three-word windows across distinct patterns, rare
+window coverage, then stable plan order. Each assignment is checked against all
+body variants, including nonwitness occurrences and matches inside words. Hashes
+only order proposals after gap planning. This bounded search is neither a
+semantic classifier nor a proof of global infeasibility. Tiny whole-body anchors
+can be impossible; uncovered individually proposable patterns fail with a
+coverage conflict. Truly unproposable records receive explicit omissions and
+remain complete model input.
+
+The table repeats no object keys and presents exact readable text, with no offset
+arithmetic. Reservations measure this actual table, complete instruction, safety
+suffix, payload and strict known-ID schema. Character and UTF-8 limits remain
+unchanged. Expansion reserves four distinct observations and four incoming refs
+including duplicates, complete metadata, mandatory plus largest optional fields
+within the combined 64-field limit, and the serialized 1600-character rendering
+cap. Impossible singletons reject before generation; feasible field-heavy inputs
+retain all mandatory and optional catalog entries. The render cap remains a
+final acceptance predicate, with no shortening or repair.
+
+This is active offline implementation, not native acceptance. Focused protocol,
+source membership, privacy, scope, lexical and mocked persistence tests exercise
+the route. The completed delegated full regression and mock migration pass;
+independent review of the active route and structured-source correction passes. Actual model selection, frozen native 1200/100K, installed Chrome,
+full token fit and deadline acceptance remain root-owned gates.

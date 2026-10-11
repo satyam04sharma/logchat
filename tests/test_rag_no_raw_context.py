@@ -1,4 +1,5 @@
 """Context consumers use compact selected facts without original event messages."""
+from tests.catalog_selector import select_topics
 from dataclasses import replace
 import json
 import pytest
@@ -15,8 +16,8 @@ class SummaryModel:
     async def generate(self,instruction,context,schema):
         if 'items' in context:return {'sections':[[r['ref'] for r in context['items']]]}
         fields=[field['field_ref'] for field in context['field_catalog'] if field['key'] in {'email','phone','error_code'}]
-        assert set(schema['properties']) == {'source_phrases', 'important_fields'}
-        return {'source_phrases':[{'record_ref':context['records'][0]['ref'], 'text':'Session renewal rejected'}],
+        assert set(schema['properties']) == {'phrase_refs', 'important_fields'}
+        return {**select_topics(context, ['Session renewal rejected']),
                 'important_fields':fields}
 
 async def fixture(count=2, statuses=None):

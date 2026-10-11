@@ -1,4 +1,5 @@
 """Temporary originals use real SQLite; every generation/embedding provider is mocked."""
+from tests.catalog_selector import select_topics
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -195,8 +196,8 @@ class Generation:
             raise RuntimeError(RAW)
         if "items" in context:
             return {"sections": [[item["ref"] for item in context["items"]]]}
-        assert set(schema['properties']) == {'source_phrases', 'important_fields'}
-        return {"source_phrases": [{"record_ref": context["records"][0]["ref"], "text": "Request failed"}],
+        assert set(schema['properties']) == {'phrase_refs', 'important_fields'}
+        return {**select_topics(context, ["Request failed"]),
                 "important_fields": [field["field_ref"] for field in context["field_catalog"] if field["key"] == "error_code"]}
 
 

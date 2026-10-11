@@ -1,6 +1,110 @@
 # Source-observation correction status
 
-## Current checkpoint — joint lexical controls, iteration 2
+## Current checkpoint — reviewed active catalog selector
+
+Fresh production now builds one authenticated, globally safe source catalog before
+packing and uses ID-only semantic model selection. Lossless catalog tables retain
+complete records and typed field input. Bounded generic plaintext and parsed
+key/leaf privacy-gap alternatives preserve tested useful operation fragments;
+structured proposals use exact original leaf content. Every planned union and
+final selected union passes the unchanged all-body privacy rule. The strict known
+ref decoder validates every incoming item before declared exact-ref deduplication.
+Historical representations, embedding recipes and IDs remain unchanged.
+
+The delegated final suite passes **1,446 tests and 363 subtests**, with one opt-in
+skip. Independent review resolves the previous no-connective/transport and
+JSON-only/prefixed-source regressions. Original three-app 400-event inputs retain
+all required incident proposals (web2/2, worker2/2, auth4/4) with zero omissions.
+These are offline proposal and strict-mock checks; model selection, native token
+fit, deadlines, installed Chrome, a new1200 cycle and full100K remain unproved.
+The reviewed private test helpers bind original execution guard/checker bytes and
+the exact source corpus; historical failed results are unchanged.
+
+Root integrated the reviewed runtime from delegated checkpoint `15f7981`. The
+historical checkpoints below preserve intermediate claims and failures; they are
+not the current activation or release verdict. No release go-ahead is granted.
+
+## Historical checkpoint — generic catalog adequacy (not activated)
+
+Catalog proposals now reserve every occurrence of a small declared English
+connective grammar across all protected body variants. Candidates retain exact
+contiguous content spans on either side; hashes only break ties after this
+policy. The unchanged global union guard still decides privacy. No retry,
+alternative search, fixture vocabulary, budget increase, or privacy exception
+was added. A reserved-gap conflict rejects explicitly when a previously
+individually proposable pattern loses coverage. Atomic omissions remain explicit;
+no-connective and multilingual fallback does not promise semantic coverage.
+
+Read-only offline reconstruction of the submitted 400-event/app producer bundle,
+using the preserving parser and authenticated canonical/producer/projection
+exclusions, retained all requested incident anchors for web, worker and auth.
+The complete catalog unions passed the body guard with zero pattern omissions
+(133, 111 and 182 phrases respectively). These are candidate-availability checks,
+not real model selections, production feasibility or native acceptance.
+
+Portable controls cover renamed operations, nine connective variants, content
+on both sides, negation, rare mixed incidents, repeated words, multilingual and
+no-connective fallback, all connective positions, and nonwitness gap conflicts.
+Focused catalog/preflight/observation validation: **185 passed**.
+Full offline regression: **1,373 passed, 1 skipped, 363 subtests passed**, with
+two existing dependency deprecation warnings. `node tests/native_ui_contract.cjs`
+and `git diff --check` passed. All validation processes exited; no background
+service was started. No linter/formatter is configured. This iteration did not
+repeat the package build; root's isolated build already passed, and the prior
+environment-specific no-isolation failure is not an application build blocker.
+
+Production activation is still outstanding: `compact_summary_batch` dispatches
+the old text selector. The next unit must construct one complete authenticated
+catalog before packing, pass it through every preflight/request/generation path,
+switch instruction/schema/validation without fallback, and retain truthful
+selector provenance without changing historical evidence. Production mocks must
+then select supplied IDs and preserve the full atomicity/history/privacy gates.
+No actual model/API/tokenizer/embedding/intake/browser calls or manual commits
+were made. Root owns native acceptance; the orchestrator owns commits.
+
+## Prior checkpoint — catalog preflight, iteration 2 (not activated)
+
+The request, packing and reservation helpers now accept the explicit transient
+catalog contract. They preserve the old request when no catalog is supplied,
+check exact source bindings after splits, expose phrase-ref and omission schema,
+and reserve complete input plus selector/expanded evidence/embedding sizes using
+UTF-8 and JSON escaping. Reservations include four incoming duplicate refs even
+for a one-item catalog and the unchanged mandatory/optional combined-64 fields.
+Unknown protocol values and binding failures reject; only capacity failures split.
+
+This is incremental infrastructure, not production activation. The current
+`compact_summary_batch` still constructs the old request and validates the old
+text selectors. No native failure is fixed at this checkpoint. Global catalog
+construction in that entry point, new instruction/validator dispatch, durable
+selector provenance, useful mixed-incident proposal coverage and migration of
+production controls remain necessary. Original saved-response replay and the
+actual 35-record case have not been revalidated here. Old fixtures and historical
+golden identities/recipes remain unchanged.
+
+A new boundedness finding: a synthetic 100-word, 1,189-character source generates
+579 safe proposals and a complete 50,560-character request, exceeding the unchanged
+24,000-character input cap. The preflight rejects the singleton without trimming.
+Thus the 4,096-item catalog cap alone does not make otherwise short records
+feasible. Proposal adequacy and transport feasibility need joint review before
+activation; raising budgets or silently discarding tail proposals is not a fix.
+
+Added offline controls cover 35 repeated synthetic records, unchanged complete
+inputs, schema/duplicate policy, every allowed small-catalog selection, atomic
+omissions, exact character/UTF-8 request boundaries, stale bindings, cross-packed
+union privacy, complete mandatory fields, full optional-field bounds and oversized
+singletons. These are helper-level checks, not actual model usefulness evidence.
+
+Validation: focused checks **70 passed**; final full suite **1,336 passed,
+1 skipped, 363 subtests passed**, with two existing dependency deprecation
+warnings. `node tests/native_ui_contract.cjs` and `git diff --check` passed. All
+validation processes exited. The offline package build remains blocked by missing `setuptools.build_meta` / `setuptools` in
+the prescribed environment. No dependency installation was attempted and no
+linter/formatter is configured. No model/API/tokenizer/embedding/intake/browser
+calls, background services or manual commits were made. Root retains native and
+release acceptance; the orchestrator owns the checkpoint commit. The configured
+stop condition is not met.
+
+## Prior checkpoint — joint lexical controls, iteration 2
 
 Added 16 deterministic controls with current authenticated v3 synthetic quotations
 and below-floor (0.499999) vector scores plus actual mock-backend lexical hits.

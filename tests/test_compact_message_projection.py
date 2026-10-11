@@ -7,9 +7,13 @@ import pytest
 
 from connectors.local import normalized_model_message, parse_push_events
 from logchat.local.raw_capture import content_digest
-from logchat.rag.sections import (COMPACT_INSTRUCTION, SectionModelError, SummaryConfig,
+from logchat.rag.sections import (CATALOG_COMPACT_INSTRUCTION, SectionModelError, SummaryConfig,
     _compact_feasible, _compact_request, _json, compact_records_for_chunk,
     compact_summary_batch, records_for_chunk, section_batch, validate_refinement)
+from logchat.rag.source_catalog import build_source_catalog
+from pipeline.model_transport import SYSTEM_SAFETY_SUFFIX, model_json
+from connectors.local import validated_normalization_origin
+from logchat.rag.sections import _source_fields
 from tests.test_grouping_projection import prepare, sidecar
 from tests.test_rag_compact import CompactModel
 from tests.test_rag_sections import LocalPartitionModel
@@ -19,6 +23,23 @@ async def fixture(values):
     events = parse_push_events(values, preserve_fields=True)
     original = await section_batch(prepare(events), LocalPartitionModel(), model_events=sidecar(events))
     return events, original
+
+
+def catalog_request_options(batch, candidates):
+    """Reconstruct the complete authenticated global sidecar for equality checks."""
+    rows = [row for chunk in batch.chunks for row in records_for_chunk(chunk)]
+    messages = {row["event_key"]: normalized_model_message(candidates[row["event_key"]])
+                if candidates else row["message"] for row in rows}
+    bodies = {row["event_key"]: {row["message"], messages[row["event_key"]]} for row in rows}
+    for row in rows:
+        event = candidates[row["event_key"]] if candidates else None
+        origin = validated_normalization_origin(event) if event else None
+        if origin is not None:
+            bodies[row["event_key"]].add(event.message[:origin.prefix_chars])
+    typed_values = {_json(value) for row in rows for value in _source_fields(row).values()
+                    if not isinstance(value, dict)}
+    return messages, dict(source_catalog=build_source_catalog(messages, bodies, typed_values=typed_values),
+                          protected_bodies=bodies)
 
 
 def value(index, **extra):
@@ -153,15 +174,15 @@ async def test_mixed_status_section_keeps_each_message_measurement_binding(proje
             assert supplied["request_status"] == 200
     # Generation and preflight use the same complete bounded request.
     config = SummaryConfig()
-    messages = {key: normalized_model_message(event) for key, event in candidates.items()} if projected else None
-    expected, schema, _, _ = _compact_request(chunk, records, config, messages)
+    messages, options = catalog_request_options(original, candidates)
+    expected, schema, _, _ = _compact_request(chunk, records, config, messages, **options)
     assert payload == expected
-    _compact_feasible(chunk, records, config, messages)
-    serialized = COMPACT_INSTRUCTION + _json(payload) + _json(schema)
+    _compact_feasible(chunk, records, config, messages, **options)
+    serialized = CATALOG_COMPACT_INSTRUCTION + SYSTEM_SAFETY_SUFFIX + model_json(payload) + model_json(schema)
     assert len(serialized) <= config.input_character_budget
     assert len(serialized.encode()) <= config.input_byte_budget
-    assert "complete ordered exact substring membership" in COMPACT_INSTRUCTION
-    assert "not timestamp span, adjacency, cause or recovery" in COMPACT_INSTRUCTION
+    assert "complete ordered exact substring membership" in CATALOG_COMPACT_INSTRUCTION
+    assert "not timestamp span, adjacency, cause or recovery" in CATALOG_COMPACT_INSTRUCTION
     assert [content_digest(event) for event in events] == digests
     assert compact.coverage == original.coverage
     assert compact.event_keys == original.event_keys
@@ -194,10 +215,10 @@ async def test_separated_auth_runs_keep_timestamps_span_and_work_sum_distinct(pr
     assert chunk.metrics.event_count == 30
     records = records_for_chunk(chunk)
     candidates = sidecar(events) if projected else None
-    messages = {key: normalized_model_message(event) for key, event in candidates.items()} if projected else None
+    messages, options = catalog_request_options(original, candidates)
     config = SummaryConfig()
-    expected, schema, _, _ = _compact_request(chunk, records, config, messages)
-    _compact_feasible(chunk, records, config, messages)
+    expected, schema, _, _ = _compact_request(chunk, records, config, messages, **options)
+    _compact_feasible(chunk, records, config, messages, **options)
     model = CompactModel("empty_fields")
     digests = [content_digest(event) for event in events]
     compact = await compact_summary_batch(original, model, model_events=candidates)
@@ -219,9 +240,9 @@ async def test_separated_auth_runs_keep_timestamps_span_and_work_sum_distinct(pr
         for key in ("request_status", "duration_ms", "timestamp"):
             assert supplied[key] == canonical[key]
     assert "consecutive" not in _json(payload) and "adjacency" not in _json(payload)
-    assert "not timestamp span, adjacency, cause or recovery" in COMPACT_INSTRUCTION
+    assert "not timestamp span, adjacency, cause or recovery" in CATALOG_COMPACT_INSTRUCTION
     assert "NOT elapsed wall-clock time" in payload["metric_semantics"]["duration_sum_ms"]
-    serialized = COMPACT_INSTRUCTION + _json(payload) + _json(schema)
+    serialized = CATALOG_COMPACT_INSTRUCTION + SYSTEM_SAFETY_SUFFIX + model_json(payload) + model_json(schema)
     assert len(serialized) <= config.input_character_budget
     assert len(serialized.encode()) <= config.input_byte_budget
     assert [content_digest(event) for event in events] == digests

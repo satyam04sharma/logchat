@@ -30,13 +30,11 @@ class Selector:
 
     async def generate(self, instruction, payload, schema):
         self.calls.append((instruction, deepcopy(payload), deepcopy(schema)))
-        assert set(schema['properties']) == {'source_phrases', 'important_fields'}
+        from tests.catalog_selector import select_topics
+        assert set(schema['properties']) == {'phrase_refs', 'important_fields'}
         assert 'serialized' in instruction and '1600' in instruction
-        phrases = [{'record_ref': next(row['ref'] for row in payload['records'] if text in row['message']),
-                    'text': text} for text in self.phrases
-                   if any(text in row['message'] for row in payload['records'])]
-        return {'source_phrases': phrases,
-                'important_fields': [f['field_ref'] for f in payload['field_catalog']] if self.fields else []}
+        return select_topics(payload, self.phrases, fields=self.fields, allow_absent_topics=True)
+
 
 
 async def fresh(events, selector):
@@ -62,9 +60,13 @@ async def test_35_record_actual_route_membership_and_complete_reservations(first
         assert {k: o[k] for k in ('exact_metrics', 'observed_window')} == _facts([
             row for row in evidence['records'] if row['ref'] in expected])
     records = records_for_chunk(source.chunks[0])
-    payload, schema, _, _ = _compact_request(source.chunks[0], records, SummaryConfig())
+    from logchat.rag.source_catalog import build_source_catalog
+    views = {r['event_key']: r['message'] for r in records}
+    bodies = {key: [text] for key, text in views.items()}
+    options = dict(source_catalog=build_source_catalog(views, bodies), protected_bodies=bodies)
+    payload, schema, _, _ = _compact_request(source.chunks[0], records, SummaryConfig(), **options)
     assert selector.calls[0][1:] == (payload, schema)
-    bounds = _compact_feasible(source.chunks[0], records, SummaryConfig())
+    bounds = _compact_feasible(source.chunks[0], records, SummaryConfig(), **options)
     for value, kind in ((compact.chunks[0].compact_evidence, 'evidence'),
                         (embedding_text(compact.chunks[0]), 'embedding')):
         assert len(value) <= bounds[kind + '_chars']
@@ -102,7 +104,7 @@ async def test_overlap_repetition_causal_source_numbers_are_quotes_not_generated
 
 
 @pytest.mark.asyncio
-async def test_atomic_union_across_packed_chunks_includes_nonwitness_body():
+async def test_atomic_union_across_packed_chunks_includes_nonwitness_body(monkeypatch):
     # 33 required correlations per record force separate packed requests. Each
     # local selection is safe, but their union reconstructs the third record.
     from connectors.local import parse_push_events
@@ -119,6 +121,12 @@ async def test_atomic_union_across_packed_chunks_includes_nonwitness_body():
             chosen = 'alpha' if text.startswith('alpha extra') else 'beta' if text.startswith('beta extra') else None
             return {'source_phrases': [{'record_ref': 'e0', 'text': chosen}] if chosen else [], 'important_fields': []}
 
+    # Corrupt the trusted decoder to exercise the independent final guard;
+    # normal catalog dispatch cannot select this deliberately unsafe union.
+    from logchat.rag.source_observations import select_observations
+    def corrupt(value, records, views, bodies, fields, catalog, *, output_budget):
+        return select_observations(value, records, views, bodies, fields, output_budget=output_budget)
+    monkeypatch.setattr('logchat.rag.source_catalog.select_catalog_observations', corrupt)
     selector = Across([])
     with pytest.raises(SectionModelError, match='compact_invalid_output'):
         await compact_summary_batch(source, selector, model_events=sidecar(normalized))
@@ -205,14 +213,24 @@ async def test_reserves_full_optional_union_independently_for_chars_and_utf8():
 
 
 @pytest.mark.asyncio
-async def test_escaped_phrase_set_rejects_rendering_without_repair_or_source_mutation():
+async def test_escaped_phrase_set_rejects_rendering_without_repair_or_source_mutation(monkeypatch):
     phrases = [chr(i) * 120 for i in (1, 2, 3, 4)]
     source = await section_batch(batch([event(i, phrase + ' omitted content') for i, phrase in enumerate(phrases)]), LocalPartitionModel())
     assert len(source.chunks) == 1
     # Preflight reserves 1600 for accepted summaries: this source is feasible,
     # although the chosen four heavily escaped phrases fail the final predicate.
     _compact_feasible(source.chunks[0], records_for_chunk(source.chunks[0]), SummaryConfig())
-    selector = Selector(phrases)
+    # Historical free-text seam remains strict, independent of active grammar.
+    from logchat.rag.source_observations import select_observations
+    def historical(value, records, views, bodies, fields, catalog, *, output_budget):
+        return select_observations(value, records, views, bodies, fields, output_budget=output_budget)
+    monkeypatch.setattr('logchat.rag.source_catalog.select_catalog_observations', historical)
+    class Historical(Selector):
+        async def generate(self, instruction, payload, schema):
+            self.calls.append(payload)
+            return {'source_phrases': [{'record_ref': f'e{i}', 'text': text}
+                                      for i, text in enumerate(phrases)], 'important_fields': []}
+    selector = Historical(phrases)
     with pytest.raises(SectionModelError, match='compact_invalid_output'):
         await compact_summary_batch(source, selector)
     assert len(selector.calls) == 1
