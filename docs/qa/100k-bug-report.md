@@ -21,6 +21,7 @@ Current release status: **not ready to publish as a validated 100K demo**. Histo
 | Model-written operation counts contradict exact records | Fresh cycle 3: 35 source events become 49 claimed operations; 33 mixed events undercount 32 directory observations as 30. Delegated versioned source-observation correction pending |
 | Relevance prompts silently truncated by the native provider | Reviewed lossless transport and native guard pass actual overflow rejection and exact full-input/provider-token reconciliation for measured requests |
 | Joint relevance decisions omit an eligible source | Historical full-input exact lookup fails twice with auth rejected. Reviewed independent classification now passes actual exact/cross-service/semantic proofs; fresh-workload acceptance remains pending |
+| Source-backed facts escape a narrow query window | Confirmed in inactive release candidate: an out-of-window incident reaches classifier and answer; per-cell scoped projection correction pending |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
@@ -321,3 +322,12 @@ The complete independent prose audit also finds unsupported counts across mixed 
 Independent review of the inactive replacement protocol found a privacy regression before integration. Its phrase validator rejects individually complete bodies and unions exact covered character positions, but requires interior whitespace to be covered too. Selecting `auth` from one source and `operation` from another is accepted even when a third protected body is exactly `auth operation`; joining the retained phrases with a space reconstructs that complete body. The foundation remains withheld.
 
 Acceptance: reconstruction exclusion applies across all protected current bodies and selected fragments, including non-witness records and whitespace-only gaps; add space, tab, newline and conservative separator controls without changing exact phrase occurrence membership. Also keep canonical rendering within the existing summary limit rather than raising it or losing retained fields. New protocol activation and real-model acceptance remain separate gates.
+
+
+## Withheld active v3 candidate: narrow-window context leakage
+
+Independent offline end-to-end review of the active candidate reproduces a temporal-context bug. One immutable compact chunk contains a status-504, 5,000-ms incident at time zero and a healthy status-200, 2-ms event at 30 seconds. A query restricted to 29–31 seconds still sends both phrase observations and their measurements to the relevance classifier, and the readable answer includes the out-of-window incident.
+
+The new source-observation facts are correct for the stored chunk, but `active_compact_context(chunk)` has no requested-scope argument and consumers use its complete projection. Existing boundary-metric gaps do not scope the new phrase facts. Canonical storage remains unchanged; the active candidate is withheld despite its passing structural suite.
+
+Acceptance: per-cell factual context includes only supported in-window records, selected-field references, source-phrase memberships and recomputed exact facts, or explicitly separates whole-artifact inspection from queried facts. The classifier must not use an out-of-window incident as query support. Preserve immutable canonical identity, historical recipes, literal/citation bindings and multi-cell semantics. Add actual route tests for narrow half-open boundaries, empty phrase membership, shared chunks across different cells and partial field membership, then independently review before fresh native proof.
