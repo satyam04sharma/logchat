@@ -244,3 +244,14 @@ The minimal reviewed clarification adds that definition while retaining addition
 Its actual exact query still fails. The complete 5,756-token prompt plus 1,200-token reserve fits, provider input counts match exactly, and normal stop/strict labels/citations/canonical checks pass. The safe decision audit now records worker as `topic_match`, auth as `not_relevant`, and web as `topic_match`, all at uncalibrated confidence 1.0. Selected precision remains 1.0 and finite recall/source coverage remain 2/3. The explanation gap was real, but this clarification is insufficient to establish model quality.
 
 This failed proof is retained. Model-contract query generations now total eleven; fresh compaction proof attempts remain zero. Escalated review must distinguish bulk/position effects from semantic misclassification with a bounded, preflighted diagnostic before choosing a further correction. Repeating the unchanged query, accepting two-service coverage or auto-promoting the rejected candidate would not satisfy release acceptance.
+
+
+## One-shot rotation diagnostic: order-sensitive joint relevance
+
+One bounded diagnostic rotated the same complete candidates from worker/auth/web to auth/web/worker and reassigned the opaque sequential references. Offline reversal reproduced every original evidence byte; question, instructions, schema, limits, measurements and model options were unchanged. The source/native executable freeze was independently verified before execution.
+
+The rotated request again measured 5,756 input tokens, matched the provider count exactly and stopped normally. Auth, web and worker all received valid positive `topic_match` judgements at uncalibrated confidence 1.0. Original files remained unchanged. This supports order/reference-sensitive joint decisions for this fixture; it does not prove a universal middle-address bug or reliable retrieval. It is a direct diagnostic, not a fresh API-context or simulation pass. Relevance generations now total twelve.
+
+The reviewed next correction separates independent relevance classification from final selection. A new flat label/confidence contract will evaluate one complete candidate per call, then select only validated threshold-passing positives with existing literal/service/source fairness. The legacy capped selection validator remains unchanged. The new policy must retain six admitted candidates per cell, three selections per cell/eight total, an explicit eight-call ceiling, aggregate existing input/output budgets and one shared 60-second deadline. Any attempted-call failure must publish no selections, and deterministic planned omissions must remain explicit partial gaps. No negative may be promoted, and no favorable shuffle is used as the release fix.
+
+Implementation, independent review and multi-call native proof are pending. Fresh summary fidelity, installed browser, fully reconciled pilot/100K, GitHub bots and merge remain required.
