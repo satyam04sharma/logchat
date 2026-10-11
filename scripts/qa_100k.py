@@ -223,22 +223,28 @@ def main():
                     if not quality['passed']:results[-1]['status']='failed'
                 except Exception as error:results.append(dict(query=label,status='failed',error_category=type(error).__name__))
             duplicate=client.post(f'/projects/{pid}/events',json=dict(source_id=configs[0]['source_id'],events=smoke_events),headers={'Authorization':'Bearer '+configs[0]['token']}); replay=dict(status=duplicate.status_code,receipt=duplicate.json() if duplicate.status_code==200 else None)
-            if a.capture_burst:
-                from logchat.local.raw_capture import CaptureSpool
-                before_restart=CaptureSpool(state).status(pid)
-                server.terminate(); server.wait(timeout=20)
-                stopped_counts=CaptureSpool(state).status(pid)
-                server=subprocess.Popen([sys.executable,'-m','logchat.local.server','--state-dir',str(state),'--port',str(a.port)],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-                for attempt in range(120):
-                    try:
-                        if client.get('/health/ready').status_code==200:break
-                    except httpx.HTTPError:pass
-                    time.sleep(.5)
-                after_restart=request('GET',f'/projects/{pid}/status')['rag']['capture']
-                replay_response=client.post(f'/projects/{pid}/events',json=dict(source_id=configs[0]['source_id'],events=smoke_events),headers={'Authorization':'Bearer '+configs[0]['token']})
-                after_replay=request('GET',f'/projects/{pid}/status')['rag']['capture']
-                save(root/'restart-durability.json',dict(before=before_restart,stopped=stopped_counts,after=after_restart,after_replay=after_replay,replay_status=replay_response.status_code,replay_receipt=replay_response.json() if replay_response.status_code==200 else None,accepted_stable=all(x['accepted_events']==a.count for x in [before_restart,stopped_counts,after_restart,after_replay]),accounting_valid=after_replay['pending_events']+after_replay['completed_events']+after_replay['expired_events']==a.count,no_drops=after_replay['dropped_events']==0))
-                save(root/'processes.json',dict(server_pid=server.pid,producer_pids=[c.pid for c in producers],port=a.port,loopback=True,host_capture=False,restart_verified=True))
+            from logchat.local.raw_capture import CaptureSpool
+            index_before_restart=counts(state)
+            before_restart=CaptureSpool(state).status(pid)
+            server.terminate(); server.wait(timeout=20)
+            stopped_counts=CaptureSpool(state).status(pid)
+            stopped_index=counts(state)
+            server=subprocess.Popen([sys.executable,'-m','logchat.local.server','--state-dir',str(state),'--port',str(a.port)],cwd=ROOT,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            for attempt in range(120):
+                try:
+                    if client.get('/health/ready').status_code==200:break
+                except httpx.HTTPError:pass
+                time.sleep(.5)
+            after_restart=request('GET',f'/projects/{pid}/status')['rag']['capture']
+            index_after_restart=counts(state)
+            replay_response=client.post(f'/projects/{pid}/events',json=dict(source_id=configs[0]['source_id'],events=smoke_events),headers={'Authorization':'Bearer '+configs[0]['token']})
+            after_replay=request('GET',f'/projects/{pid}/status')['rag']['capture']
+            expected_capture_events=a.count if a.capture_burst else 0
+            restart_result=dict(before=before_restart,stopped=stopped_counts,after=after_restart,after_replay=after_replay,replay_status=replay_response.status_code,replay_receipt=replay_response.json() if replay_response.status_code==200 else None,accepted_stable=all(x['accepted_events']==expected_capture_events for x in [before_restart,stopped_counts,after_restart,after_replay]),accounting_valid=after_replay['pending_events']+after_replay['completed_events']+after_replay['expired_events']==expected_capture_events,no_drops=after_replay['dropped_events']==0,index_stable=index_before_restart==stopped_index==index_after_restart==counts(state))
+            restart_result['replay_verified']=replay_response.status_code==200 and restart_result['replay_receipt'].get('deduplicated')==a.smoke
+            restart_result['passed']=all(restart_result[key] for key in ['accepted_stable','accounting_valid','no_drops','index_stable','replay_verified'])
+            save(root/'restart-durability.json',restart_result)
+            save(root/'processes.json',dict(server_pid=server.pid,producer_pids=[c.pid for c in producers],port=a.port,loopback=True,host_capture=False,restart_verified=restart_result['passed']))
             progress=[json.loads((root/(c['app']+'-progress.json')).read_text()) for c in configs]
             snapshot=counts(state); final=dict(target=a.count,counts=snapshot,accepted=sum(p['accepted'] for p in progress),deduplicated=sum(p['deduplicated'] for p in progress),generated_unique_events=sum(p['generated'] for p in progress),acknowledged_new_producer_events=sum(p['accepted']-p['deduplicated'] for p in progress),smoke_acknowledged_events=a.smoke,complete=snapshot['indexed_events']==a.count,smoke=smoke,queries=results,duplicate_replay=replay,producer_results=progress,test_mode='temporary_original_admission_burst' if a.capture_burst else 'native_compact_semantic',runtime_status=request('GET',f'/projects/{pid}/status'),limitations=['Frequency-weighted sanitized Loghub EventTemplate replication; 6000 original samples inspected, not 100000 source-unique logs','Single machine loopback deployment','No remote or production deployment','Query evidence is selected subset; exact corpus totals independently read from durable native database'])
             capture=final['runtime_status']['rag']['capture']
@@ -247,7 +253,7 @@ def main():
             final['generation_complete']=final['generated_unique_events']==a.count
             final['retrieval_evaluation_complete']=bool(results) and all(q['status']=='passed' for q in results)
             final['exact_corpus_accounting']=reconcile(state,configs)
-            final['restart_verified']=not a.capture_burst or all(json.loads((root/'restart-durability.json').read_text())[key] for key in ['accepted_stable','accounting_valid','no_drops'])
+            final['restart_verified']=restart_result['passed']
             final['source_auth_isolation']=wrong_token.status_code==401
             final['replay_verified']=replay['status']==200 and replay['receipt']['deduplicated']==a.smoke
             final['no_pending_or_failed_work']=not capture['pending_events'] and not capture['pending_failed_events'] and not any(k!='completed' for k in snapshot['jobs'])
