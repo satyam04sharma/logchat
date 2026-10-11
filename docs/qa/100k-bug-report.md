@@ -1,6 +1,6 @@
 # 100K pipeline bug report
 
-Current release status: **not ready to publish as a validated 100K demo**. Installed Chrome cycle 3 passed all 20 checks, and fresh three-application pilot cycle 2 captured/indexed all 1,200 events with exact reconciliation and restart/replay passing. Its multi-service queries failed. The reviewed correction now passes a real native overflow-rejection control and full-input token reconciliation, but the latest exact-incident query selects only two of three relevant services. Retrieval completeness, corrected fresh prose, a passing fresh pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
+Current release status: **not ready to publish as a validated 100K demo**. Historical pilot cycle 2 captured/indexed all 1,200 events but failed multi-service selection. The reviewed independent-classification correction now passes actual exact, cross-service and semantic proofs on an unchanged copy of that index, including complete-input/provider-token reconciliation. Fresh ingestion breadth, corrected fresh prose, installed checks, a passing fresh pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
 
 | Finding | Current evidence/status |
 | --- | --- |
@@ -18,7 +18,7 @@ Current release status: **not ready to publish as a validated 100K demo**. Insta
 | Actual multi-service model selection fails validation | Duplicate references and contradictory decisions corrected structurally; full-input proofs now expose a separate order-sensitive auth relevance omission |
 | Summary metric attribution and unsupported source adjacency | Confirmed prose-fidelity bugs; per-record input correction reviewed, actual corrected prose proof still outstanding |
 | Relevance prompts silently truncated by the native provider | Reviewed lossless transport and native guard pass actual overflow rejection and exact full-input/provider-token reconciliation for measured requests |
-| Joint relevance decisions omit an eligible source | Full-input exact lookup fails twice with auth rejected; one unchanged-evidence rotation selects all services. Independent classification is active and structurally reviewed; actual acceptance is pending |
+| Joint relevance decisions omit an eligible source | Historical full-input exact lookup fails twice with auth rejected. Reviewed independent classification now passes actual exact/cross-service/semantic proofs; fresh-workload acceptance remains pending |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
@@ -264,3 +264,15 @@ The delegated candidate now routes the app through single-candidate classificati
 The full candidate suite passes 1,088 tests and 363 subtests with one opt-in native test skipped. The host separately passes 85 tests and 172 subtests for active remapping, independent classification, source diversity and identifier intent. Build, distribution and 73-file source-byte checks pass. Versioned offline proof helpers pass 19 rejection controls, six saved API evaluations and the twelve-memory fixture controls. These are structural results; no native classification acceptance or fresh compaction proof has run for this candidate.
 
 A publication review also caught the historical 4,099-token exact result still labeled as passed in its archived document. That apparent result was based on confirmed truncated input and cannot establish complete-input relevance acceptance. Its historical measurements and failed proofs must remain preserved with a prominent superseded annotation. Actual exact, cross-service and semantic multi-call proofs, fresh prose/pilot/100K, installed checks and GitHub review remain required.
+
+## Actual independent-classification query proofs
+
+The reviewed runtime passes three sequential actual proofs on byte-identical disposable copies of the historical 1,200-event index. Original state, canonical chunks and prior evidence hashes remain unchanged. Full provider responses are retained privately before decoding; public proof records contain only safe counters, decisions and hashes.
+
+| Query | Classification calls | Complete input tokens / matching provider counts | Classification wall seconds | Result |
+| --- | ---: | --- | ---: | --- |
+| Exact incident | 3 | 1,297; 1,271; 4,263 | 21.524 | Auth, web and worker selected; all gates pass |
+| Cross-service incident | 3 | 1,322; 1,296; 4,288 | 17.660 | Auth, web and worker selected; all gates pass |
+| Semantic paraphrase, web | 1 | 4,179 | 11.813 | Relevant web observation selected; all gates pass |
+
+Every complete prompt plus the unchanged 1,200-token output reserve fits the 8,192-token context. Provider counters match exact native tokenization and all calls terminate with `stop`. Strict labels/confidence, immutable caller bindings, original citations, scope, aggregate budgets, hard caps and the shared deadline pass. Only model-positive evidence is selected. These finite fixture results establish the measured relevance correction; they do not establish fresh compaction prose, global recall, production throughput or 100K completion. Relevance-proof generations now total 19, including all preserved earlier failed/diagnostic calls. The separate fresh twelve-memory HTTP breadth proof is underway.
