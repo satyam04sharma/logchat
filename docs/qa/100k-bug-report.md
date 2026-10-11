@@ -1,6 +1,6 @@
 # 100K pipeline bug report
 
-Current release status: **not ready to publish as a validated 100K demo**. Historical pilot cycle 2 captured/indexed all 1,200 events but failed multi-service selection. The reviewed independent-classification correction now passes actual exact, cross-service and semantic proofs, plus a fresh twelve-memory HTTP breadth cycle with restart/replay and complete-input/provider-token reconciliation. Corrected fresh mixed-record prose, installed Chrome checks, a passing fresh pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
+Current release status: **not ready to publish as a validated 100K demo**. Historical pilot cycle 2 captured/indexed all 1,200 events but failed multi-service selection. The reviewed independent-classification correction now passes actual exact, cross-service and semantic proofs, plus a fresh twelve-memory HTTP breadth cycle with restart/replay and complete-input/provider-token reconciliation. Installed Chrome checks pass, but fresh pilot cycle 3 exposes unsupported model-written operation counts in published and returned context. A source-backed compaction correction, a passing fresh pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
 
 | Finding | Current evidence/status |
 | --- | --- |
@@ -17,7 +17,8 @@ Current release status: **not ready to publish as a validated 100K demo**. Histo
 | Fresh breadth checker compares incompatible window shapes | Corrected with strict canonical times and half-open marker checks; ten corruption controls and a fresh complete native breadth cycle pass |
 | Digest ledger only counted, not fully reconciled | QA corrected; all canonical values/scopes/job bindings checked and seven corruption probes rejected |
 | Actual multi-service model selection fails validation | Duplicate references and contradictory decisions corrected structurally; full-input proofs now expose a separate order-sensitive auth relevance omission |
-| Summary metric attribution and unsupported source adjacency | Confirmed prose-fidelity bugs; per-record input correction reviewed, actual corrected prose proof still outstanding |
+| Summary metric attribution and unsupported source adjacency | Per-record measurements corrected; fresh cycle 3 confirms remaining unsupported operation-count prose reaches returned context |
+| Model-written operation counts contradict exact records | Fresh cycle 3: 35 source events become 49 claimed operations; 33 mixed events undercount 32 directory observations as 30. Delegated versioned source-observation correction pending |
 | Relevance prompts silently truncated by the native provider | Reviewed lossless transport and native guard pass actual overflow rejection and exact full-input/provider-token reconciliation for measured requests |
 | Joint relevance decisions omit an eligible source | Historical full-input exact lookup fails twice with auth rejected. Reviewed independent classification now passes actual exact/cross-service/semantic proofs; fresh-workload acceptance remains pending |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
@@ -293,3 +294,18 @@ After the strict checker repair and ten offline corruptions, a new owned HTTP cy
 Each query performs five independently validated classifications under the existing aggregate input budget. All complete prompts plus the output reserve fit, provider token counts match and calls stop normally. Classification wall times are 13.809 and 13.757 seconds; unclassified and selection-cap omissions remain explicit partial gaps. Restart with the original credentials preserves the canonical index, and replay deduplicates one original event without new intake generation. The owned server stops, and all 121 separately snapshotted historical/state files remain unchanged.
 
 This cycle consumes 24 native intake generations and ten relevance calls. The earlier failed cycle's 24 intake and five relevance calls remain counted separately; the relevance-proof phase now totals 34. This establishes fresh finite ingestion and breadth, not mixed-record summary fidelity or 100K acceptance. The installed wheel matches all 73 runtime/resource files and passes 28 CLI/adapter contracts; its fresh Chrome cycle, full pilot/prose and 100K gates remain required.
+
+
+## Fresh pilot cycle 3: unsupported operation counts
+
+The fresh 1,200-event native simulation captures three concurrent applications through normal HTTP intake. Its first 400-event web preparation produces 13 compact chunks with exact event references, canonical digests, metadata and selected-field bindings. All 13 publish without changing their prepared hashes. These structural checks do not establish prose fidelity.
+
+Independent source comparison finds concrete contradictions:
+
+- A 35-record section contains 11 worker initialization observations and 24 module initialization observations. Its generated summary claims 17 and 32, totaling 49.
+- Another 35-record section contains 24 and 11 observations respectively; its summary claims 35 and 10.
+- The mandatory mixed section contains one payment incident with status 504 and duration 5,000 ms, plus 32 directory observations with status 200. The corrected measurement input binds the incident correctly, but prose describes only 30 directory observations. The query issued during drain returns that unsupported count in its selected context.
+
+The compact request already includes each record's timestamp, status and duration, complete projected source text, exact aggregate metrics and observed span. The output contract validates unrestricted summary and uncertainty text for shape and length; it does not validate the propositions within that prose. Exact aggregate rendering and an unverified label therefore coexist with contradictory semantic counts. Another prompt reminder is insufficient.
+
+Acceptance: actual model compaction selects bounded, exact source evidence; code derives complete occurrence membership and renders counts, status, measured work and observed span from those members. The model may not write independent numerical, adjacency or causal claims. Preserve arbitrary typed fields, canonical identity, complete packing, original-message privacy, provider bounds and actual model stages. Version new durable semantics explicitly, keep historical identities and embedding recipes immutable, and exclude unchecked historical prose from active factual context. Require independent deterministic review, then fresh native 1,200 and fully indexed 100K cycles with useful cited context. Preserve this failed cycle unchanged.
