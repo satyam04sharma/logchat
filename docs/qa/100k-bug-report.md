@@ -331,3 +331,12 @@ Independent offline end-to-end review of the active candidate reproduces a tempo
 The new source-observation facts are correct for the stored chunk, but `active_compact_context(chunk)` has no requested-scope argument and consumers use its complete projection. Existing boundary-metric gaps do not scope the new phrase facts. Canonical storage remains unchanged; the active candidate is withheld despite its passing structural suite.
 
 Acceptance: per-cell factual context includes only supported in-window records, selected-field references, source-phrase memberships and recomputed exact facts, or explicitly separates whole-artifact inspection from queried facts. The classifier must not use an out-of-window incident as query support. Preserve immutable canonical identity, historical recipes, literal/citation bindings and multi-cell semantics. Add actual route tests for narrow half-open boundaries, empty phrase membership, shared chunks across different cells and partial field membership, then independently review before fresh native proof.
+
+
+## Reviewed source-backed and scoped-context correction
+
+The release candidate now uses actual-model-selected exact source phrases and field references, with source-bound membership and deterministic occurrence facts. Free model-written counts and uncertainties are excluded from fresh compact output. Independent review verified complete accepted-output reservations, typed-field preservation, privacy checks across the complete packed batch, immutable historical recipes, and historical unchecked prose exclusion.
+
+The subsequent per-cell correction passes independent reproduction of the temporal failure: the narrow query returns only the healthy event, and outside-only strong identifiers cause zero classifier calls or selections. Sparse original references, excluded original witnesses, field intersections and two distinct views of one canonical chunk are checked without altering canonical bytes or embedding text. The full root suite passes 1,241 tests and 363 subtests with one opt-in test skipped.
+
+Both release artifacts build and pass structure checks; all 75 installed runtime/resource files match the reviewed source, and 28 installed CLI contracts pass. Fresh installed Chrome, native-token/source-oracle instrumentation, actual corrected three-app prose and full 100K acceptance remain separate gates. The earlier failed cycle remains unchanged.
