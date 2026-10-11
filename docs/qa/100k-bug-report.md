@@ -1,6 +1,6 @@
 # 100K pipeline bug report
 
-Current release status: **not ready to publish as a validated 100K demo**. Historical pilot cycle 2 captured/indexed all 1,200 events but failed multi-service selection. The reviewed independent-classification correction now passes actual exact, cross-service and semantic proofs, plus a fresh twelve-memory HTTP breadth cycle with restart/replay and complete-input/provider-token reconciliation. Installed Chrome checks pass, but fresh pilot cycle 3 exposes unsupported model-written operation counts in published and returned context. A source-backed compaction correction, a passing fresh pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
+Current release status: **not ready to publish as a validated 100K demo**. Historical pilot cycle 2 captured/indexed all 1,200 events but failed multi-service selection. The reviewed independent-classification correction now passes actual exact, cross-service and semantic proofs, plus a fresh twelve-memory HTTP breadth cycle with restart/replay and complete-input/provider-token reconciliation. Installed Chrome checks pass, but fresh pilot cycle 3 exposes unsupported model-written operation counts in published and returned context. The reviewed source-backed/scoped correction now passes structural review; its fresh native pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
 
 | Finding | Current evidence/status |
 | --- | --- |
@@ -18,10 +18,10 @@ Current release status: **not ready to publish as a validated 100K demo**. Histo
 | Digest ledger only counted, not fully reconciled | QA corrected; all canonical values/scopes/job bindings checked and seven corruption probes rejected |
 | Actual multi-service model selection fails validation | Duplicate references and contradictory decisions corrected structurally; full-input proofs now expose a separate order-sensitive auth relevance omission |
 | Summary metric attribution and unsupported source adjacency | Per-record measurements corrected; fresh cycle 3 confirms remaining unsupported operation-count prose reaches returned context |
-| Model-written operation counts contradict exact records | Fresh cycle 3: 35 source events become 49 claimed operations; 33 mixed events undercount 32 directory observations as 30. Delegated versioned source-observation correction pending |
+| Model-written operation counts contradict exact records | Fresh cycle 3 failed; reviewed versioned source-observation correction passes structural controls, fresh actual fidelity proof pending |
 | Relevance prompts silently truncated by the native provider | Reviewed lossless transport and native guard pass actual overflow rejection and exact full-input/provider-token reconciliation for measured requests |
 | Joint relevance decisions omit an eligible source | Historical full-input exact lookup fails twice with auth rejected. Reviewed independent classification now passes actual exact/cross-service/semantic proofs; fresh-workload acceptance remains pending |
-| Source-backed facts escape a narrow query window | Confirmed in inactive release candidate: an out-of-window incident reaches classifier and answer; per-cell scoped projection correction pending |
+| Source-backed facts escape a narrow query window | Reviewed per-cell correction passes independent reproduction and outside-ID zero-admission controls; fresh actual scoped proof pending |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
