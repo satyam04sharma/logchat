@@ -26,7 +26,7 @@ Current release status: **not ready to publish as a validated 100K demo**. The l
 | Valid preview context rejected before classification | Reviewed lexical correction integrated; 39 new controls pass, fresh actual installed/query proof remains pending |
 | Structured JSON topics suppressed by whole-object gaps | Reviewed bounded parsed-span correction integrated; fresh actual workload acceptance pending |
 | Generation packing lacks exact token fit | Auth request exceeds fixed context by 510 tokens; actual vocabulary counter reproduces 7,502 input tokens; automatic default binding passes actual parity; fresh whole-workload proof pending |
-| Embedding packing lacks exact token fit | Six exact documents independently rejected; physical counts 2,050–2,088 exceed 2,048; lossless record-subdivision candidate implemented; actual derived-input acceptance pending |
+| Embedding packing lacks exact token fit | Six exact documents independently rejected; physical counts 2,050–2,088 exceed 2,048; lossless subdivision passes actual provider acceptance for original failed web400; fresh whole-workload acceptance pending |
 | Default native counter cannot load installed CPU architecture | ARM Python cannot load Intel dylib; owned Intel C worker, exact dependency staging and automatic client binding pass independent review and actual parity |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
@@ -472,3 +472,9 @@ The submitted-schema correction freezes response validation to the JSON schema a
 The new private checker is being bound to the exact subdivision lineage, final embedding requests, queued payload and published vectors. Its historical checks and failed runs remain preserved. No fresh native intake, installed-browser or 100K result is implied by a passing unit test or token parity check. GitHub main was fetched again and remains `1542801ea480ecb2dc73f438978a5b3c18f4c696`.
 
 The rebuilt wheel, source distribution and installed package match all 95 shipped runtime/resource files byte for byte. Native UI selection/copy/focus/empty-state contracts pass. A first packaging check caught a stale bundled agent setup guide; the copied guide was synchronized and a separate second build passed. Combined regression tests passed: 1,772 tests and 576 subtests, with two skips and two dependency deprecation warnings. All 28 installed CLI contracts passed. The private simulation-checker activation and actual fresh workload gates remain in progress.
+
+## Actual corrected embedding-input acceptance
+
+A separate root-owned diagnostic freezes all 95 integration runtime/resource files and reads the original failed web400 payload without changing it. The automatic public planner preserves all source records while splitting 19 chunks into 25. The real provider accepts the exact planned 16+9 requests: all 25 vectors are nonzero and 768-dimensional, and aggregate provider token counts exactly match 23,457 and 14,189 planned physical tokens. The largest individual input is 2,038 tokens, within the fixed 2,048 limit. The vocabulary worker exits and removes staging before submission. The passing diagnostic takes 5.525 seconds, with 10 metadata requests, two embedding POSTs and zero generation/intake/publication calls; this is not indexing throughput or historical-job recovery.
+
+A first separate probe incorrectly called the 16-document provider interface with all 25 derived inputs and rejected locally before any embedding POST. Its evidence remains intact; the corrected probe uses the exact planned batches. Fresh complete 1200/100K simulation and context acceptance remain required.
