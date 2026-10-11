@@ -45,12 +45,18 @@ def counts(state):
     jobs=dict(connection.execute('SELECT state,COUNT(*) FROM rag_schedule_jobs GROUP BY state'))
     import sqlite_vec
     connection.enable_load_extension(True); sqlite_vec.load(connection); connection.enable_load_extension(False)
-    vectors=connection.execute('SELECT COUNT(*) FROM rag_vectors').fetchone()[0]
+    from logchat.rag.storage import _key
+    rows=list(connection.execute('SELECT row_id,owner_id,project_id,environment_id,source_id,service,start_us,end_us FROM rag_chunks'))
+    expected={row[0]:(_key(row[1],row[2]),*row[3:]) for row in rows}
+    observed={row[0]:tuple(row[1:]) for row in connection.execute('SELECT row_id,scope_key,environment_id,source_id,service,start_us,end_us FROM rag_vectors')}
+    vectors=len(observed)
+    fts_ids={row[0] for row in connection.execute('SELECT rowid FROM rag_chunks_fts')}
+    native_index_complete=bool(expected) and expected==observed and fts_ids==set(expected)
     events=sum(c['metrics']['event_count'] for c in chunks)
     keys=connection.execute('SELECT COUNT(*) FROM rag_schedule_event_keys').fetchone()[0]
     digests=connection.execute('SELECT COUNT(*) FROM rag_schedule_event_digests').fetchone()[0]
     connection.close()
-    return dict(indexed_events=events,chunks=len(chunks),vectors=vectors,event_keys=keys,event_digests=digests,jobs=jobs,versions=dict(Counter(c['compression_version'] for c in chunks)),models=dict(Counter(c['summary_model'] for c in chunks)))
+    return dict(indexed_events=events,chunks=len(chunks),vectors=vectors,native_index_complete=native_index_complete,missing_vectors=len(set(expected)-set(observed)),orphan_vectors=len(set(observed)-set(expected)),vector_scope_mismatches=sum(observed[key]!=expected[key] for key in set(expected)&set(observed)),event_keys=keys,event_digests=digests,jobs=jobs,versions=dict(Counter(c['compression_version'] for c in chunks)),models=dict(Counter(c['summary_model'] for c in chunks)))
 
 def reconcile(state, configs):
     """Verify source metrics and exact IDs independently of query/model selection."""
@@ -109,6 +115,19 @@ def context_quality(state, configs, label, answer, service=None):
         reciprocal_rank=next((1/(index+1) for index,hit in enumerate(hits) if hit),0.0),
         relevant_memories=len(relevant),selected_memories=len(selected),source_coverage=source_coverage,
         interpretation='Seeded incident support only; bounded selection recall is reported, not a global RAGAS or entailment score')
+
+def valid_citations(answer, existing_ids):
+    evidence=answer.get('evidence',[])
+    lookup={item['id']:item for item in evidence}
+    citations=answer.get('citations',[])
+    expected=set(lookup)
+    if len(lookup)!=len(evidence) or not expected<=existing_ids:return False
+    if {item['id'] for item in citations}!=expected:return False
+    if set(answer.get('cited_evidence_ids',[]))!=expected:return False
+    for citation in citations:
+        item=lookup[citation['id']]
+        if citation.get('source_id')!=item['source_id'] or citation.get('window')!=item['window']:return False
+    return all(f'[{identifier}]' in answer.get('answer','') for identifier in expected)
 
 def main():
     p=argparse.ArgumentParser(); p.add_argument('--run-dir',required=True,type=Path); p.add_argument('--profile',required=True,type=Path); p.add_argument('--count',type=int,default=100000); p.add_argument('--minutes',type=float,default=90); p.add_argument('--smoke',type=int,default=48); p.add_argument('--batch',type=int,default=48); p.add_argument('--capture-burst',action='store_true'); p.add_argument('--drain-seconds',type=int,default=180); p.add_argument('--port',type=int,default=18960); a=p.parse_args()
@@ -195,7 +214,7 @@ def main():
                     query_pid=other['id'] if label=='empty control project' else pid
                     answer=request('POST',f'/projects/{query_pid}/ask',body); evidence=answer.get('evidence',[])
                     db=sqlite3.connect(f'file:{state}/rag.db?mode=ro',uri=True); existing_ids={row[0] for row in db.execute('SELECT chunk_id FROM rag_chunks')}; db.close()
-                    citations_valid=all(c['id'] in existing_ids and c['id'] in {e['id'] for e in evidence} for c in answer.get('citations',[])) and set(answer.get('cited_evidence_ids',[]))=={e['id'] for e in evidence} and (not evidence or bool(answer.get('citations'))) 
+                    citations_valid=valid_citations(answer,existing_ids)
                     valid_scope=all(e['project_id']==query_pid and e['environment_id']==eid and (not service or e.get('service')==service) for e in evidence)
                     save(root/('query-'+label.replace(' ','-')+'.json'),answer)
                     results.append(dict(query=label,seconds=round(time.monotonic()-start,3),evidence_count=len(evidence),scope_valid=valid_scope,citations_valid=citations_valid,incident_found='INC_CORRELATION_73' in json.dumps(evidence),empty_expected=label in {'empty environment','negative','empty control project'},status='passed' if valid_scope and citations_valid and (label not in {'exact incident','worker scope','auth scope'} or 'INC_CORRELATION_73' in json.dumps(evidence)) and (label!='cross service incident' or {e.get('service') for e in evidence}=={'web','worker','auth'}) and (bool(evidence) if label not in {'empty environment','negative','empty control project'} else not evidence) else 'failed'))
@@ -224,7 +243,7 @@ def main():
             snapshot=counts(state); final=dict(target=a.count,counts=snapshot,accepted=sum(p['accepted'] for p in progress),deduplicated=sum(p['deduplicated'] for p in progress),generated_unique_events=sum(p['generated'] for p in progress),acknowledged_new_producer_events=sum(p['accepted']-p['deduplicated'] for p in progress),smoke_acknowledged_events=a.smoke,complete=snapshot['indexed_events']==a.count,smoke=smoke,queries=results,duplicate_replay=replay,producer_results=progress,test_mode='temporary_original_admission_burst' if a.capture_burst else 'native_compact_semantic',runtime_status=request('GET',f'/projects/{pid}/status'),limitations=['Frequency-weighted sanitized Loghub EventTemplate replication; 6000 original samples inspected, not 100000 source-unique logs','Single machine loopback deployment','No remote or production deployment','Query evidence is selected subset; exact corpus totals independently read from durable native database'])
             capture=final['runtime_status']['rag']['capture']
             final['admission_complete']=capture['accepted_events']==a.count if a.capture_burst else final['accepted']==a.count
-            final['rag_complete']=final['complete']
+            final['rag_complete']=final['complete'] and snapshot['native_index_complete']
             final['generation_complete']=final['generated_unique_events']==a.count
             final['retrieval_evaluation_complete']=bool(results) and all(q['status']=='passed' for q in results)
             final['exact_corpus_accounting']=reconcile(state,configs)
