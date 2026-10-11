@@ -213,3 +213,12 @@ The host independently reran the corrected query helper's offline preflight: 12 
 Independent review of the initial context-guard candidate found that GGUF/completion/empty-history metadata also permits a model with nonempty `remote_host` and `remote_model`. Ollama's inspected generation handler proxies such models before scheduling the verified local runner, bypassing the context guard. Thus a configured loopback endpoint alone does not establish local execution or input preservation.
 
 The candidate is withheld pending a minimal correction: reject either remote-routing field when nonempty or malformed before generation, and prove this with both-field, single-field and between-call model-metadata changes. No remote requests or actual native proof calls were made during this review. The projection and compact transport remain independently valid; passing tests on the initial guard does not override this finding.
+
+
+## Reviewed guard and native proof setup status
+
+The routing repair now rejects either remote field unless absent or exactly empty. Independent review passes 197 guard tests plus 23 separate transport controls; the host's focused checks pass 265 tests and 120 subtests. The final candidate suite passes 1,054 tests and 316 subtests with one opt-in model test skipped. These establish bounded transport behavior, not actual retrieval acceptance.
+
+Two synthetic native overflow preflights stopped before completion because their QA helper expected a `sha256:` prefix in running-model metadata. The inspected API returns the bare 64-character hexadecimal digest; it exactly matches the manifest file hash, and the loaded context is 8,192. Each attempt performed one render-only request, with no tokenization or completion request. The first helper recorded only its error category; a preserved diagnostic attempt established the exact identity-format mismatch. An independent process check verified the expected model runner.
+
+This is a QA identity-representation bug, not a passing overflow control or a runtime-model failure. Correct the checker against the actual API shape, retain strict exact digest matching and all failed artifacts, then refreeze the changed helper before further native proofs. Model-contract query generations remain nine, and fresh compaction proof attempts remain zero. Full fresh simulation, 100K indexing and GitHub release acceptance remain outstanding.
