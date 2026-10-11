@@ -117,7 +117,7 @@ def test_exact_duplicate_refs_normalize_only_after_full_validation():
     assert select(data, [ref] * 4) == select(data, [ref])
     with pytest.raises(ValueError):
         select(data, [ref, ref, 'unknown'])
-    for change in ({'important_fields': ['f0', 'f0']}, {'important_fields': [False]},
+    for change in ({'important_fields': [False]},
                    {'important_fields': ['missing']}, {'summary': 'invented'},
                    {'source_phrases': []}):
         with pytest.raises(ValueError):

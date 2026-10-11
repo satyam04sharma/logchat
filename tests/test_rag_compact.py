@@ -156,10 +156,11 @@ class CompactTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(model.calls, 1)
         self.assertIsNone(original.chunks[0].compact_evidence)
 
-    async def test_repeated_selection_rejects_without_normalization(self):
+    async def test_repeated_catalog_selection_preserves_complete_compact_result(self):
         original = await sections_fixture()
-        with self.assertRaisesRegex(SectionModelError, "compact_invalid_output"):
-            await compact_summary_batch(original, CompactModel("duplicate"))
+        expected = await compact_summary_batch(original, CompactModel())
+        repeated = await compact_summary_batch(original, CompactModel("duplicate"))
+        self.assertEqual(repeated, expected)
         self.assertIsNone(original.chunks[0].compact_evidence)
 
     async def test_empty_selection_preserves_correlation_and_declares_other_loss(self):

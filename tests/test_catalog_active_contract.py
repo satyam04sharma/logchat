@@ -82,7 +82,7 @@ async def test_one_global_catalog_used_before_packing_and_for_every_request(monk
                         ('message', 'timestamp', 'request_status', 'duration_ms')}}
         for chunk in source.chunks for row in records_for_chunk(chunk)]
     for chunk in compact.chunks:
-        assert 'selector_protocol:source-catalog-selector-v1' in chunk.loss_notes
+        assert 'selector_protocol:source-catalog-selector-v2' in chunk.loss_notes
         assert len(validate_compact_chunk(chunk)['important_fields']) == 33
     serialized = json.dumps(asdict(compact), default=str)
     assert 'phrase_catalog' not in serialized and 'payload_7f93' not in serialized

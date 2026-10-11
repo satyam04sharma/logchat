@@ -17,9 +17,9 @@ def compact_reservations(payload, records, config):
     if "input_projection" in payload:
         payload = expand_compact_input(payload)
     protocol = payload.get('selector_protocol')
-    if 'selector_protocol' in payload and protocol != SELECTOR_PROTOCOL:
+    if 'selector_protocol' in payload and protocol not in ('source-catalog-selector-v1', SELECTOR_PROTOCOL):
         raise ValueError('unknown_compact_selector_protocol')
-    catalog = payload['phrase_catalog'] if protocol == SELECTOR_PROTOCOL else None
+    catalog = payload['phrase_catalog'] if protocol in ('source-catalog-selector-v1', SELECTOR_PROTOCOL) else None
     fields = payload['field_catalog']
     required = set(payload['required_field_refs'])
     slots = 64 - len(required)
@@ -29,6 +29,11 @@ def compact_reservations(payload, records, config):
         return len(text.encode('utf-8')) if byte else len(text)
 
     def field_array(byte, semantic=False, refs_only=False):
+        # V2 reserves the original incoming list, before known-ref deduplication.
+        # Historical v1 and durable/embedding arrays retain distinct-field bounds.
+        if refs_only and protocol == SELECTOR_PROTOCOL:
+            largest = max((cost(f["field_ref"], byte) for f in fields), default=0)
+            return 2 + 64 * (largest + 1) - 1 if fields else 2
         def item(field):
             if refs_only:
                 return field['field_ref']

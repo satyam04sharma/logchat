@@ -778,9 +778,11 @@ Do not write phrases, witnesses, prose or metrics.
 you decide which useful quotes to retain from the current records.
 An empty selection is permitted, never required. Explicit catalog omissions mean
 no safe proposal exists in the declared grammar; their source records remain input.
-Select each useful field_ref at most once. The union with required_field_refs must
-contain at most 64 distinct fields. Catalog text is exact, source-bound and checked
-as a global union against canonical, producer and projection bodies before packing.
+Select at most 64 incoming field refs. Validate every original field ref before
+normalizing exact known repeats in first-occurrence order. The union with
+required_field_refs must contain at most 64 distinct fields. Catalog text is exact,
+source-bound and checked as a global union against canonical, producer and
+projection bodies before packing.
 """ + COMPACT_INSTRUCTION[COMPACT_INSTRUCTION.index("Code derives complete ordered"):]
 
 
@@ -1161,8 +1163,13 @@ def _expanded_compact_request(chunk, records, config, messages=None, *, source_c
         payload.update(selector_protocol=SELECTOR_PROTOCOL,
             phrase_catalog=[[phrase["phrase_ref"], phrase["text"]] for phrase in bound],
             phrase_ref_redundancy="validate_all_then_exact_first_occurrence",
+            field_ref_redundancy="validate_all_then_exact_first_occurrence",
             catalog_omissions=[{"record_ref": row["ref"], "reason": "no_safe_proposal_in_grammar"}
                                for row in metadata if row["event_key"] in source_catalog.omissions])
+        # Catalog v2 alone permits bounded redundancy; legacy stays strict.
+        field_schema = schema["properties"]["important_fields"]
+        del field_schema["uniqueItems"]
+        field_schema["maxItems"] = 64 if field_catalog else 0
         refs = [phrase["phrase_ref"] for phrase in bound]
         schema["required"] = ["phrase_refs", "important_fields"]
         del schema["properties"]["source_phrases"]

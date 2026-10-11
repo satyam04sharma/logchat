@@ -16,7 +16,7 @@ from logchat.rag.source_observations import (
     select_observations,
 )
 
-SELECTOR_PROTOCOL = "source-catalog-selector-v1"
+SELECTOR_PROTOCOL = "source-catalog-selector-v2"
 MAX_PROPOSALS = 65536
 MAX_CATALOG_PHRASES = 4096
 MAX_PROPOSAL_WORDS = 6
@@ -368,10 +368,10 @@ def select_catalog_observations(value, records, source_views, protected_bodies,
                                 field_refs, catalog, *, output_budget):
     """Strict new transport; validate ALL incoming refs before deduplication.
 
-    At most four incoming references are permitted, even if redundant. Exact
+    At most four phrase and 64 field refs may arrive, even if redundant. Exact
     repeated known refs are normalized in first-occurrence order. Unknown IDs,
-    invalid types and extra keys cannot hide behind redundancy. Fields retain
-    the historical distinct-ID policy and caller-owned mandatory union check.
+    invalid types and extra keys cannot hide behind redundancy. The caller owns
+    the unchanged mandatory field union check.
     """
     if (not isinstance(value, dict) or set(value) != {"phrase_refs", "important_fields"}
             or len(_json(value)) > output_budget):
@@ -384,12 +384,11 @@ def select_catalog_observations(value, records, source_views, protected_bodies,
         raise ValueError("invalid_source_catalog_refs")
     fields = value["important_fields"]
     if (not isinstance(fields, list) or len(fields) > 64
-            or any(not isinstance(ref, str) or ref not in field_refs for ref in fields)
-            or len(set(fields)) != len(fields)):
+            or any(not isinstance(ref, str) or ref not in field_refs for ref in fields)):
         raise ValueError("invalid_source_observation_fields")
     phrases = [{key: lookup[ref][key] for key in ("record_ref", "text")}
                for ref in dict.fromkeys(refs)]
-    expanded = {"source_phrases": phrases, "important_fields": value["important_fields"]}
+    expanded = {"source_phrases": phrases, "important_fields": list(dict.fromkeys(fields))}
     # The transport budget applies to the actual ref response. Expansion is code
     # derived, separately reserved by the caller; it is never model prose.
     observations, fields = select_observations(
