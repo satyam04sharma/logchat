@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import httpx
+LOGHUB_REVISION='dd61d0952749ee7963bde24220d1be5ede023033'
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
 
@@ -14,7 +15,7 @@ def datasets(root):
     provenance=[]; result={}
     names=['Apache','Linux','OpenSSH']
     with httpx.Client(trust_env=False,timeout=60,follow_redirects=True) as client:
-        commit=client.get('https://api.github.com/repos/logpai/loghub/commits/master'); commit.raise_for_status(); revision=commit.json()['sha']
+        revision=LOGHUB_REVISION
         for name in names:
             values={}
             for suffix in ['log_structured.csv','log_templates.csv']:

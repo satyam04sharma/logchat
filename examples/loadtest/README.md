@@ -14,10 +14,12 @@ A 48-event smoke measures elapsed processing time and extrapolates the 100K dura
 
 Owned producers and the service are stopped at completion. Existing local services and Ollama remain running. Model output can vary; failed stages are surfaced by category and do not silently substitute a model.
 
-If the measured semantic preparation rate makes a full 100K completion impractical, a separate admission rehearsal can be run explicitly:
+To admit a concurrent 100K burst and then validate the fully indexed corpus, run:
 
 ```sh
-python scripts/qa_100k.py --run-dir /absolute/path/fresh-burst-state --profile /absolute/path/to/existing/rag.json --count 100000 --minutes 15 --batch 400 --capture-burst --drain-seconds 330
+python scripts/qa_100k.py --run-dir /absolute/path/fresh-burst-state --profile /absolute/path/to/existing/rag.json --count 100000 --minutes 15 --batch 400 --capture-burst --drain-seconds 7200
 ```
 
 This enables bounded temporary synthetic originals (`retain_until_summarized`, 512 MiB, 24-hour expiry) while the actual selected native models run. It reports generated/admitted/indexed counts separately. `admission_complete` is not `rag_complete`; a backlog is not successful retrieval of 100K logs. The script still returns nonzero unless full native indexing and retrieval validation complete. Originals remain private in the owned disposable run state until summarized, expired, or the run directory is removed.
+
+Full acceptance requires every synthetic ID exactly once in compact metadata and the source ledger, matching per-source counts, duration sums and status counts, all model jobs complete, no pending or failed originals, three-service incident context, negative and scope checks, authenticated-source isolation, and restart/replay durability. `report.json.acceptance_passed` must be true; exit code zero requires all gates. Use `--port` to select a free private loopback port. The drain budget is a test limit, not a claimed completion time. Failed cycles remain failed even when admission succeeds.
