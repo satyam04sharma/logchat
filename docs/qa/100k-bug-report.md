@@ -1,6 +1,6 @@
 # 100K pipeline bug report
 
-Current release status: **not ready to publish as a validated 100K demo**. Historical pilot cycle 2 captured/indexed all 1,200 events but failed multi-service selection. The reviewed independent-classification correction now passes actual exact, cross-service and semantic proofs on an unchanged copy of that index, including complete-input/provider-token reconciliation. Fresh ingestion breadth, corrected fresh prose, installed checks, a passing fresh pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
+Current release status: **not ready to publish as a validated 100K demo**. Historical pilot cycle 2 captured/indexed all 1,200 events but failed multi-service selection. The reviewed independent-classification correction now passes actual exact, cross-service and semantic proofs, plus a fresh twelve-memory HTTP breadth cycle with restart/replay and complete-input/provider-token reconciliation. Corrected fresh mixed-record prose, installed Chrome checks, a passing fresh pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
 
 | Finding | Current evidence/status |
 | --- | --- |
@@ -14,7 +14,7 @@ Current release status: **not ready to publish as a validated 100K demo**. Histo
 | Auth embedding token overflow hidden by generic failure | Corrected; fresh pilot cycle 2 indexes all 400 auth events and all 1,200 total events |
 | Repeated incident candidates crowd out a requested service | Corrected candidate; independent crowding, joint-match and comparison-alternative probes pass |
 | Incomplete vector/citation acceptance checks | QA corrected; corruption probes reject incomplete evidence |
-| Fresh breadth checker compares incompatible window shapes | Confirmed QA bug: API adds the existing half-open `bounds` marker to canonical start/end. Strict timestamps and marker checks must replace whole-dictionary equality before repeating the proof |
+| Fresh breadth checker compares incompatible window shapes | Corrected with strict canonical times and half-open marker checks; ten corruption controls and a fresh complete native breadth cycle pass |
 | Digest ledger only counted, not fully reconciled | QA corrected; all canonical values/scopes/job bindings checked and seven corruption probes rejected |
 | Actual multi-service model selection fails validation | Duplicate references and contradictory decisions corrected structurally; full-input proofs now expose a separate order-sensitive auth relevance omission |
 | Summary metric attribution and unsupported source adjacency | Confirmed prose-fidelity bugs; per-record input correction reviewed, actual corrected prose proof still outstanding |
@@ -285,3 +285,11 @@ The fresh HTTP fixture indexed all twelve one-event memories, twelve completed j
 The overall proof still failed because its compound canonical check compared the API window dictionary directly with the stored window dictionary. Canonical start/end match exactly; the API also includes the established `bounds: "[start,end)"` marker. Summary, chunk IDs, service and project/environment/source scopes all match. This is a checker shape bug, not a changed source window. The correction must require exact canonical timestamps, the half-open marker and the expected API shape, with shifted/missing/extra/wrong-bound controls; it must not remove temporal checks.
 
 The failed whole run remains preserved, and the owned server stopped. All 64 independently snapshotted original state and historical evidence files remain unchanged. It consumed 24 native intake generations and five relevance generations, accounted separately; the relevance-proof total is now 24. Cross-service/restart/replay for this fresh fixture did not run after the failure. A fresh full breadth cycle is required after reviewed QA correction; fresh prose/pilot/100K and publication gates remain outstanding.
+
+## Fresh breadth cycle 2 passes
+
+After the strict checker repair and ten offline corruptions, a new owned HTTP cycle with new project, source credentials and state passes all gates. It indexes twelve distinct one-event memories, completed jobs and real 768-dimensional vectors, four per service. Exact canonical event IDs, keys, digests, measurement values, scopes, windows and vector/full-text bindings reconcile. Exact and cross-service queries each select three distinct services with valid original citations. Their bounded precision and source coverage are 1.0; selected recall is honestly 3/12 under the three-selection cap.
+
+Each query performs five independently validated classifications under the existing aggregate input budget. All complete prompts plus the output reserve fit, provider token counts match and calls stop normally. Classification wall times are 13.809 and 13.757 seconds; unclassified and selection-cap omissions remain explicit partial gaps. Restart with the original credentials preserves the canonical index, and replay deduplicates one original event without new intake generation. The owned server stops, and all 121 separately snapshotted historical/state files remain unchanged.
+
+This cycle consumes 24 native intake generations and ten relevance calls. The earlier failed cycle's 24 intake and five relevance calls remain counted separately; the relevance-proof phase now totals 34. This establishes fresh finite ingestion and breadth, not mixed-record summary fidelity or 100K acceptance. The installed wheel matches all 73 runtime/resource files and passes 28 CLI/adapter contracts; its fresh Chrome cycle, full pilot/prose and 100K gates remain required.
