@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from logchat.rag.compact_input import COMPACT_INPUT_VERSION, expand_compact_input
 from logchat.rag.sections import (
     CATALOG_COMPACT_INSTRUCTION, SectionModelError, SummaryConfig, _compact_request,
     compact_summary_batch, records_for_chunk, section_batch,
@@ -68,8 +69,18 @@ async def test_one_global_catalog_used_before_packing_and_for_every_request(monk
     compact = await compact_summary_batch(source, model)
     assert len(catalogs) == 1 and len(model.calls) == 3 and requests
     assert all(call[0] == CATALOG_COMPACT_INSTRUCTION for call in model.calls)
-    assert {row['message'] for _, payload, _ in model.calls for row in payload['records']} == {
-        row['message'] for chunk in source.chunks for row in records_for_chunk(chunk)}
+    expanded_records = []
+    for _, payload, _ in model.calls:
+        assert payload['input_projection'] == COMPACT_INPUT_VERSION
+        rows = expand_compact_input(payload)['records']
+        assert len(rows) == 1  # Each 33-field member requires its own request.
+        expanded_records.extend(rows)
+    # Compare ordered members, not a set: messages must retain their exact
+    # timestamp/measurement binding, with refs local to each singleton request.
+    assert expanded_records == [
+        {'ref': 'e0', **{key: row[key] for key in
+                        ('message', 'timestamp', 'request_status', 'duration_ms')}}
+        for chunk in source.chunks for row in records_for_chunk(chunk)]
     for chunk in compact.chunks:
         assert 'selector_protocol:source-catalog-selector-v1' in chunk.loss_notes
         assert len(validate_compact_chunk(chunk)['important_fields']) == 33
