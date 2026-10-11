@@ -1,6 +1,6 @@
 # 100K pipeline bug report
 
-Current release status: **not ready to publish as a validated 100K demo**. Historical pilot cycle 2 captured/indexed all 1,200 events but failed multi-service selection. The reviewed independent-classification correction now passes actual exact, cross-service and semantic proofs, plus a fresh twelve-memory HTTP breadth cycle with restart/replay and complete-input/provider-token reconciliation. Installed Chrome checks pass, but fresh pilot cycle 3 exposes unsupported model-written operation counts in published and returned context. The reviewed source-backed/scoped correction now passes structural review; its fresh native pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
+Current release status: **not ready to publish as a validated 100K demo**. Historical pilot cycle 2 captured/indexed all 1,200 events but failed multi-service selection. The reviewed independent-classification correction now passes actual exact, cross-service and semantic proofs, plus a fresh twelve-memory HTTP breadth cycle with restart/replay and complete-input/provider-token reconciliation. Earlier installed Chrome checks pass, but fresh pilot cycle 3 exposes unsupported model-written operation counts in published and returned context. The first installed Chrome cycle with the source-backed correction fails compaction for some actual batches (10 checks pass, 9 fail). The reviewed source-backed/scoped correction now passes structural review; its fresh native pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
 
 | Finding | Current evidence/status |
 | --- | --- |
@@ -22,6 +22,7 @@ Current release status: **not ready to publish as a validated 100K demo**. Histo
 | Relevance prompts silently truncated by the native provider | Reviewed lossless transport and native guard pass actual overflow rejection and exact full-input/provider-token reconciliation for measured requests |
 | Joint relevance decisions omit an eligible source | Historical full-input exact lookup fails twice with auth rejected. Reviewed independent classification now passes actual exact/cross-service/semantic proofs; fresh-workload acceptance remains pending |
 | Source-backed facts escape a narrow query window | Reviewed per-cell correction passes independent reproduction and outside-ID zero-admission controls; fresh actual scoped proof pending |
+| Fresh installed source-observation compaction rejects actual batches | New blocking failure: console HTTP503 `compact_invalid_output`, auth development 0/2 indexed; exact validator diagnosis pending |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
@@ -340,3 +341,9 @@ The release candidate now uses actual-model-selected exact source phrases and fi
 The subsequent per-cell correction passes independent reproduction of the temporal failure: the narrow query returns only the healthy event, and outside-only strong identifiers cause zero classifier calls or selections. Sparse original references, excluded original witnesses, field intersections and two distinct views of one canonical chunk are checked without altering canonical bytes or embedding text. The full root suite passes 1,241 tests and 363 subtests with one opt-in test skipped.
 
 Both release artifacts build and pass structure checks; all 75 installed runtime/resource files match the reviewed source, and 28 installed CLI contracts pass. Fresh installed Chrome, native-token/source-oracle instrumentation, actual corrected three-app prose and full 100K acceptance remain separate gates. The earlier failed cycle remains unchanged.
+
+## First installed source-observation cycle fails actual compaction
+
+The fresh installed-wheel Chrome cycle on the independently reviewed source-backed/scoped candidate completed with 10 passing and 9 failing checks. Console capture returned HTTP503 with processing category `compact_invalid_output`. Auth development indexed 0 of 2 expected events; production indexed all 4 and preview indexed all 3. Subsequent missing-context and populated-reader checks also failed. These checks are recorded as failures, without treating all nine as independently diagnosed runtime bugs. The owned service stopped, with host capture disabled and no demo servers or containers started.
+
+The installed runtime/resource bytes match the reviewed candidate. The complete regression suite (1,241 tests and 363 subtests), 28 installed CLI contracts, package structure audit and UI contract controls passed; none override this actual failure. The run did not preserve parsed provider output, so `compact_invalid_output` alone cannot establish the exact rejected selector or validator reason. Independent offline diagnosis and a fresh instrumented native run are required. Release, the 100K go-ahead and GitHub merge remain blocked.
