@@ -733,13 +733,19 @@ _COMPACT_METADATA = ("event_key", "event_id", "timestamp", "source", "service", 
 _OMISSION_NOTICE = "Only selected original fields are retained; omitted source details cannot be recovered from this summary."
 _RAW_FIELD_NAMES = {"message", "msg", "raw_message", "raw_log", "raw_logs", "fingerprint", "supporting_records"}
 
+_SOURCE_QUOTE_SELECTION_INSTRUCTION = """When safe eligible phrases exist, select quotes that jointly identify the operation
+or subject and what happened. Prefer one informative combined phrase or
+complementary phrases; retain meaningful multiword actions over isolated generic
+words or partial actions. Preserve distinctive context of rare failures.
+Source assertions remain attributed quotes, never established explanations.
+"""
+
 COMPACT_INSTRUCTION = """Select meaningful exact source phrases and useful field_ref IDs for retrieval.
 Return only source_phrases and important_fields. Each phrase has record_ref and
 text: a nonempty exact contiguous substring of that current record's message,
 at most 120 characters. Select at most four distinct phrases. Do not return
-prose, counts, metrics, uncertainty, causes, or extra keys. Source assertions
-remain attributed quotes, never established explanations. Prefer distinctive
-operations and outcomes, including rare events. Empty selection is permitted
+prose, counts, metrics, uncertainty, causes, or extra keys.
+""" + _SOURCE_QUOTE_SELECTION_INSTRUCTION + """Empty selection is permitted
 when no safe useful phrase exists, not as a substitute for inspecting evidence.
 Select each useful field_ref at most once. Required field refs are retained
 independently; the UNION of required and selected refs must contain at most 64.
@@ -767,9 +773,9 @@ Return exactly phrase_refs and important_fields, arrays of IDs only. Select at m
 four incoming phrase refs. Exact repeated known phrase refs are normalized in
 first-occurrence order ONLY after every incoming ref is validated. Unknown IDs,
 wrong types, extra keys and more than four incoming refs reject the whole output.
-Do not write phrases, witnesses, prose or metrics. Prefer distinctive operations
-and outcomes, including rare events. Catalog proposals are not semantic selections:
-you decide which useful operations and outcomes to retain from the current records.
+Do not write phrases, witnesses, prose or metrics.
+""" + _SOURCE_QUOTE_SELECTION_INSTRUCTION + """Catalog proposals are not semantic selections:
+you decide which useful quotes to retain from the current records.
 An empty selection is permitted, never required. Explicit catalog omissions mean
 no safe proposal exists in the declared grammar; their source records remain input.
 Select each useful field_ref at most once. The union with required_field_refs must

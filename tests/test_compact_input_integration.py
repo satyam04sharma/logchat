@@ -113,7 +113,8 @@ async def test_all_final_projected_requests_proved_before_first_generation():
 
 
 @pytest.mark.asyncio
-async def test_exact_counter_and_generation_hook_receive_projected_complete_body():
+@pytest.mark.parametrize('catalog', [False, True])
+async def test_exact_counter_and_generation_hook_receive_projected_complete_body(catalog):
     import json
     import httpx
     from pipeline.models import LocalModels
@@ -121,8 +122,11 @@ async def test_exact_counter_and_generation_hook_receive_projected_complete_body
 
     source, views, options = await fixture(['operation failed with rare detail'] * 4)
     chunk = source.chunks[0]
+    instruction = CATALOG_COMPACT_INSTRUCTION if catalog else COMPACT_INSTRUCTION
+    selection_key = 'phrase_refs' if catalog else 'source_phrases'
+    response = {selection_key: [], 'important_fields': []}
     payload, schema, _, _ = _compact_request(
-        chunk, records_for_chunk(chunk), SummaryConfig(), views, **options)
+        chunk, records_for_chunk(chunk), SummaryConfig(), views, **(options if catalog else {}))
     sent = []
 
     def handler(request):
@@ -131,15 +135,27 @@ async def test_exact_counter_and_generation_hook_receive_projected_complete_body
         if request.url.path == '/api/show':
             return httpx.Response(200, json={'details': {'format': 'gguf'}, 'capabilities': ['completion']})
         sent.append(json.loads(request.content))
-        return httpx.Response(200, json={'response': '{"phrase_refs":[],"important_fields":[]}'})
+        return httpx.Response(200, json={'response': json.dumps(response)})
 
     counter = Counter()
     model = LocalModels(base_url='http://localhost:11434', chat_model='mistral:7b', preserve_content=True,
                         generation_token_counter=counter, transport=httpx.MockTransport(handler))
-    assert await model.preflight_generation(CATALOG_COMPACT_INSTRUCTION, payload, schema)
-    assert await model.generate(CATALOG_COMPACT_INSTRUCTION, payload, schema) == {
-        'phrase_refs': [], 'important_fields': []}
-    expected = generation_body(model.chat_model, CATALOG_COMPACT_INSTRUCTION, payload, schema)
+    assert await model.preflight_generation(instruction, payload, schema)
+    assert await model.generate(instruction, payload, schema) == response
+    expected = generation_body(model.chat_model, instruction, payload, schema)
     assert counter.requests == [expected, expected]
     assert sent == [expected]
     assert json.loads(expected['prompt'])['input_projection'] == COMPACT_INPUT_VERSION
+    # Contract delivery only: an inert response does not prove model usefulness.
+    policy = (
+        'When safe eligible phrases exist, select quotes that jointly identify the operation\n'
+        'or subject and what happened. Prefer one informative combined phrase or\n'
+        'complementary phrases; retain meaningful multiword actions over isolated generic\n'
+        'words or partial actions. Preserve distinctive context of rare failures.\n'
+        'Source assertions remain attributed quotes, never established explanations.\n'
+    )
+    assert expected['system'].count(policy) == 1
+    without_policy = generation_body(model.chat_model, instruction.replace(policy, ''), payload, schema)
+    assert request_digest(without_policy) != request_digest(expected)
+    assert schema['properties'][selection_key]['maxItems'] == 4
+    assert payload['combined_field_limit'] == 64
