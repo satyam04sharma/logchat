@@ -359,6 +359,15 @@ class VocabularyRuntime:
                         os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
+                    except PermissionError:
+                        # Darwin can report EPERM for a group containing only
+                        # the just-exited child before asyncio has reaped it.
+                        # Never suppress permission failure for a live worker.
+                        try:
+                            async with asyncio.timeout(1):
+                                await process.wait()
+                        except TimeoutError:
+                            raise VocabularyRuntimeError("vocabulary_worker_cleanup_failed") from None
                     await process.wait()
             finally:
                 if self._directory is not None:

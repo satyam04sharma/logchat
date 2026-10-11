@@ -323,3 +323,38 @@ async def test_deleted_asset_diagnostic_contains_no_private_path(assets):
         with pytest.raises(VocabularyRuntimeError, match="^vocabulary_asset_identity_invalid$"):
             await value.count(b"private", add_special=True, parse_special=True)
     assert_reaped(value)
+
+
+@pytest.mark.asyncio
+async def test_exited_worker_group_permission_race_is_reaped(assets, monkeypatch):
+    value = owner(assets)
+    await value.__aenter__()
+    # Reproduce Darwin's exited-group EPERM deterministically without a live
+    # process permission bypass: first terminate and reap this owned child.
+    value._process.kill()
+    await value._process.wait()
+    def denied(group, sig):
+        assert group == value._process.pid
+        raise PermissionError()
+    monkeypatch.setattr(runtime.os, 'killpg', denied)
+    await value.aclose()
+    assert_reaped(value)
+
+
+@pytest.mark.asyncio
+async def test_live_worker_group_permission_failure_is_not_suppressed(assets, monkeypatch):
+    value = owner(assets)
+    await value.__aenter__()
+    original = runtime.os.killpg
+    def denied(group, sig):
+        assert group == value._process.pid
+        raise PermissionError()
+    monkeypatch.setattr(runtime.os, 'killpg', denied)
+    try:
+        with pytest.raises(VocabularyRuntimeError, match='^vocabulary_worker_cleanup_failed$'):
+            await value._stop(force=True)
+        assert value._process.returncode is None
+    finally:
+        original(value._process.pid, runtime.signal.SIGKILL)
+        await value._process.wait()
+    assert_reaped(value)

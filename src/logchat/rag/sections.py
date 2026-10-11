@@ -1279,7 +1279,17 @@ async def _pack_compact_physical(batch, local_model, config, messages=None, **ca
     return refined
 
 
-async def compact_summary_batch(batch, local_model, *, config=None, model_events=None):
+async def compact_summary_batch(batch, local_model, *, config=None, model_events=None, deadline=None):
+    # The complete physical plan and all submissions share one lazy vocabulary.
+    # Existing mock/remote adapters without this capability keep their contract.
+    session = getattr(local_model, "generation_token_session", None)
+    if callable(session):
+        async with session(deadline=deadline):
+            return await _compact_summary_batch(batch, local_model, config=config, model_events=model_events)
+    return await _compact_summary_batch(batch, local_model, config=config, model_events=model_events)
+
+
+async def _compact_summary_batch(batch, local_model, *, config=None, model_events=None):
     """Select checked source observations atomically; retain no complete bodies."""
     config = config or SummaryConfig()
     validate_batch(batch)

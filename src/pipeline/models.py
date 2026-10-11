@@ -5,6 +5,8 @@ import json
 import math
 import os
 import asyncio
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 import socket
 from ipaddress import ip_address
 from urllib.parse import urlparse
@@ -143,8 +145,50 @@ class LocalModels:
         self.chat_model = chat_model or os.getenv("LOGCHAT_CHAT_MODEL", "qwen2.5:1.5b")
         self.embedding_model = embedding_model or os.getenv("LOGCHAT_EMBEDDING_MODEL", "nomic-embed-text")
         self.transport = transport
-        self.generation_token_counter = generation_token_counter
+        self._injected_token_counter = generation_token_counter
+        self._token_session = ContextVar("local_model_token_session", default=None)
         self._generation_token_identity = getattr(generation_token_counter, "identity", None)
+
+    @property
+    def generation_token_counter(self):
+        return (self._injected_token_counter if self._injected_token_counter is not None
+                else self._token_session.get())
+
+    @generation_token_counter.setter
+    def generation_token_counter(self, value):
+        self._injected_token_counter = value
+        self._generation_token_identity = getattr(value, "identity", None)
+
+    @asynccontextmanager
+    async def generation_token_session(self, *, deadline=None):
+        """Task-local plan ownership; injected adapters retain their lifecycle."""
+        if self.generation_token_counter is not None:
+            yield self.generation_token_counter
+            return
+        from pipeline.native_tokenizer.ollama import OllamaCounter
+        now = asyncio.get_running_loop().time()
+        counter = OllamaCounter(self, deadline=min(deadline if deadline is not None else now + 300, now + 300))
+        token = self._token_session.set(counter)
+        try:
+            async with asyncio.timeout_at(counter.deadline):
+                yield counter
+        finally:
+            try:
+                await counter.aclose()
+            finally:
+                self._token_session.reset(token)
+
+    @asynccontextmanager
+    async def embedding_token_session(self, *, deadline=None):
+        """Physical Nomic proof API only; does not change embedding recipes."""
+        from pipeline.native_tokenizer.ollama import OllamaCounter
+        now = asyncio.get_running_loop().time()
+        counter = OllamaCounter(self, deadline=min(deadline if deadline is not None else now + 300, now + 300), embedding=True)
+        try:
+            async with asyncio.timeout_at(counter.deadline):
+                yield counter
+        finally:
+            await counter.aclose()
 
     async def installed(self):
         try:
@@ -245,15 +289,14 @@ class LocalModels:
                                context if self.preserve_content else sanitize(context), schema)
         if len(body["prompt"]) > CONTEXT_CHARACTER_BUDGET:
             raise ModelUnavailable("Context exceeds the local model budget. Select fewer environments or a shorter question.")
-        return body
+        # Snapshot nested caller-owned schema before the first await.
+        return json.loads(model_json(body))
 
     async def preflight_generation(self, instruction, context, schema):
         """Exact local counting only; never use generation as a sizing probe.
 
-        The injected adapter must pin and verify renderer/tokenizer/runtime
-        identity, including effective context and all special-token framing.
-        Missing support fails closed; the QA private-runner helper is not an
-        implementation of this portable production contract.
+        The default preserved client lazily opens the reviewed local binding.
+        A plan session reuses one owner; a standalone probe closes on return.
         """
         return await self._preflight_generation_body(self.generation_request(instruction, context, schema))
 
@@ -261,27 +304,55 @@ class LocalModels:
         from pipeline.token_budget import GenerationTokenCount, GenerationTokenIdentity
         counter = self.generation_token_counter
         if counter is None:
-            raise ModelUnavailable("generation_token_capability_unavailable")
+            if not self.preserve_content:
+                raise ModelUnavailable("generation_token_capability_unavailable")
+            async with self.generation_token_session():
+                return await self._preflight_generation_body(body)
+        from pipeline.native_tokenizer.ollama import OllamaCounter, CompatibilityError
+        automatic = isinstance(counter, OllamaCounter)
         try:
-            identity = self._generation_token_identity
+            # Opening the lazy default also verifies its provider/model identity.
+            proof = await counter.count(model_json(body).encode()) if automatic else None
+            identity = counter.identity if automatic else self._generation_token_identity
             if (not isinstance(identity, GenerationTokenIdentity)
                     or identity.runtime_version not in VERIFIED_CONTEXT_GUARD_VERSIONS
                     or counter.identity != identity):
                 raise ValueError()
             # Give the adapter immutable exact bytes, not mutable source objects.
-            proof = await counter.count(model_json(body).encode())
+            if not automatic:
+                proof = await counter.count(model_json(body).encode())
             if not isinstance(proof, GenerationTokenCount) or counter.identity != identity:
                 raise ValueError()
             return proof.fits(body, identity)
+        except CompatibilityError as error:
+            raise ModelUnavailable(str(error)) from None
+        except TimeoutError:
+            raise
         except Exception:
+            if automatic:
+                from pipeline.native_tokenizer.ollama import incompatible
+                raise ModelUnavailable(str(incompatible("asset/runtime verification failed"))) from None
             raise ModelUnavailable("generation_token_proof_unavailable") from None
 
     async def generate(self, instruction, context, schema):
+        if self.preserve_content and self.transport is None and self.generation_token_counter is None:
+            async with self.generation_token_session():
+                return await self.generate(instruction, context, schema)
         body = self.generation_request(instruction, context, schema)
         await self._require_generation_context_guard()
         if self.generation_token_counter is not None:
             if not await self._preflight_generation_body(body):
                 raise GenerationContextExceeded("Local model input exceeds its native context limit.")
+        from pipeline.native_tokenizer.ollama import OllamaCounter, CompatibilityError
+        counter = self.generation_token_counter
+        if isinstance(counter, OllamaCounter):
+            try:
+                await counter.verify_provider()
+            except CompatibilityError as error:
+                raise ModelUnavailable(str(error)) from None
+            except Exception:
+                from pipeline.native_tokenizer.ollama import incompatible
+                raise ModelUnavailable(str(incompatible("provider verification failed"))) from None
         data = await self._post("/api/generate", body)
         if data.get("done_reason") == "length":
             raise ModelUnavailable("Local model exhausted its output budget.")

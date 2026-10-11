@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AsyncExitStack
 from dataclasses import asdict
 from datetime import timedelta
 import json
@@ -385,7 +386,10 @@ class NativeRAGRuntime:
             if pending and unfinished >= 64:
                 raise ModelUnavailable("intake_backpressure_retry_required")
             diagnostics.emit("admitted", events=len(events), pending=len(pending))
-            async with asyncio.timeout(300):
+            async with asyncio.timeout(300) as intake_timeout, AsyncExitStack() as token_owners:
+                session = getattr(self.model_profile.generation("summary"), "generation_token_session", None)
+                if callable(session):
+                    await token_owners.enter_async_context(session(deadline=intake_timeout.when()))
                 for offset in range(0, len(pending), 400):
                     if unfinished + len(jobs) >= 64:
                         raise ModelUnavailable("intake_backpressure_retry_required")
@@ -404,7 +408,7 @@ class NativeRAGRuntime:
                     diagnostics.advance("compact")
                     compact = await compact_summary_batch(sectioned, _TimedIntakeModel(
                         self.model_profile.generation("summary"), diagnostics, "summary"),
-                        model_events=model_events)
+                        model_events=model_events, deadline=intake_timeout.when())
                     diagnostics.advance("validate_enqueue")
                     validate_compact_batch(compact)
                     jobs.append(self.scheduler.enqueue(compact,
