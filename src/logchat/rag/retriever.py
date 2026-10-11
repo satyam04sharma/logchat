@@ -27,6 +27,45 @@ from pipeline.redaction import redact_text
 IMPLEMENTATION = "scoped-hybrid-rrf-v6"
 _TOKEN = re.compile(r"[A-Za-z0-9][\w.-]{1,79}")
 
+# Closed English scaffolding list, not stemming, synonyms or a topic vocabulary.
+# Negation remains in the original question for independent classification.
+_TOPIC_SCAFFOLDING = frozenset("""
+a an the and or but if then of to in on at by for from with as into through
+is are was were be been being do does did have has had can could would should
+will may might must it its this that these those there their they them we you
+your our i me my what which who when where why how please show find tell give
+explain describe summarize inspect investigate about regarding happened happening
+not no never without any all some during between before after since until
+log logs event events record records source sources service services environment
+environments window period time current previous selected retained observed
+observation observations quote quotes phrase phrases summary summaries evidence
+count counts total metrics measurements missing unknown provenance membership
+memberships checked original discarded unavailable available context exists
+""".split())
+
+
+def _joint_source_topics(question, chunk, observations):
+    """All non-scaffolding terms in ONE checked quote; at least two topics.
+
+    Only whole casefolded tokens match. Context labels and ID/numeric tokens
+    cannot supply the two meaningful words. They are not removed from the
+    joint-support requirement, so extra question constraints fail conservatively.
+    The caller supplies only validated, cell-scoped current observations.
+    """
+    def tokens(text):
+        return {token.casefold() for token in re.findall(r"\w+(?:[.@:/+\-]\w+)*", text)}
+
+    terms = tokens(question) - _TOPIC_SCAFFOLDING
+    context_labels = " ".join((chunk.service, chunk.identity.source_id,
+                               chunk.identity.environment_id, chunk.identity.project_id,
+                               chunk.identity.owner_id))
+    labels = tokens(context_labels) | {
+        word.casefold() for word in re.findall(r"[^\W_]+", context_labels)}
+    meaningful = {term for term in terms - labels - _identifiers(question)
+                  if re.fullmatch(r"[a-z]{3,}", term)}
+    return len(meaningful) >= 2 and any(
+        terms <= tokens(observation["text"]) for observation in observations)
+
 
 @dataclass(frozen=True, slots=True)
 class RetrievalConfig:
@@ -439,9 +478,12 @@ def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content
     candidates, rejected = [], 0
     for identifier, chunk in chunks.items():
         vector, lex = vectors.get(identifier), lexical.get(identifier)
+        observations = ()
         if chunk.compression_version == COMPACT_VERSION:
             from logchat.rag.sections import active_compact_context
-            active_records = active_compact_context(chunk, cell)["retained_events"]
+            context = active_compact_context(chunk, cell)
+            active_records = context["retained_events"]
+            observations = context["source_observations"]
             if not active_records:
                 rejected += 1
                 continue
@@ -464,7 +506,9 @@ def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content
             exact = any(_literal_in_question(value, question)
                         for record in active_records
                         for values in _record_values(record).values() for value in values)
-        if not exact and (vector is None or vector.score < config.min_vector_similarity):
+        joint_topics = (lex is not None and preserve_content and
+                        _joint_source_topics(question, chunk, observations))
+        if not exact and not joint_topics and (vector is None or vector.score < config.min_vector_similarity):
             rejected += 1
             continue
         score = ((1 / (config.rrf_constant + vector.rank)) if vector else 0) + (

@@ -1,6 +1,78 @@
 # Source-observation correction status
 
-## Current checkpoint — query-scoped correction and control hardening
+## Current checkpoint — joint lexical controls, iteration 2
+
+Added 16 deterministic controls with current authenticated v3 synthetic quotations
+and below-floor (0.499999) vector scores plus actual mock-backend lexical hits.
+Service/source fairness survives a leading crowd and the six-candidate and
+three-selection caps; a fairly admitted negative source still cannot be selected.
+Bounded lexical results exclude later vector-only hits. Exact-field controls
+preserve same-field alternatives, late joint-field witness priority and absent-ID
+exclusion. Late invalid/provider failures and deadline expiry discard earlier
+positives; external cancellation cancels the pending call and stops execution.
+The original shared deadline remains capped at 60 seconds even when the supplied
+configuration permits 180 seconds. No runtime changes were needed this iteration.
+
+Complete v3 requests exhaust the unchanged aggregate input budget before eight
+calls in the three-cell fixture. The test verifies round-robin ordering, visible
+budget omissions and bounded selection without shrinking evidence or increasing
+limits. Separate character/UTF-8 budget controls retain complete-request admission.
+Existing independent-classification controls still exercise the eight-call/global
+selection ceiling. Retrieval can retain bounded nonmatching literal neighbors;
+only eligible witnesses reach classification, with joint witnesses ordered first.
+
+Validation: focused lexical, scope, fairness, classifier and retriever checks
+**141 passed, 1 skipped, 92 subtests passed**. Full suite **1,280 passed,
+1 skipped, 363 subtests passed**, with two dependency deprecation warnings.
+`node tests/native_ui_contract.cjs` and `git diff --check` passed. Offline build
+was retried with `--no-isolation` and remains blocked by missing `setuptools`;
+no environment/dependency installation was performed. No linter/formatter is
+configured in `pyproject.toml`. All started validation processes exited; no
+background service, browser or watcher was started.
+
+Worker delta review found changes limited to deterministic tests and this status
+note; the prior runtime correction remains unchanged. The precise policy and
+limits are documented in `source-observation-protocol.md`. The clean orchestrator
+commit and root independent correction review remain pending, so the full stop
+condition is not yet claimed. Root owns integration and actual native acceptance.
+No actual model/network/embedding/intake/browser calls were made, and no actual
+native, 1200/100K, release or installed UI acceptance is claimed.
+
+## Prior checkpoint — joint lexical admission, iteration 1
+
+The retriever now admits an actual bounded backend lexical hit below the unchanged
+0.5 cosine floor only when all non-scaffolding query tokens occur in one checked
+in-window v3 quotation, with at least two meaningful words. A closed conservative
+English scaffolding policy, context-label exclusions (including label components),
+and identifier exclusions prevent non-topic overlap from supplying those words.
+See the protocol for exact matching and unchanged literal/classification limits.
+No summary-format authentication, compaction, embedding or canonical identity
+policy changed.
+
+The new synthetic controls cover joint support, additional-topic and partial-word
+rejection, cross-quote/cross-record non-stitching, pre-cap partial crowds, labels,
+boilerplate, absent IDs, half-open scope, historical prose, required backend hits,
+the unchanged vector floor, and strict negative/low-confidence/invalid responses.
+The original question, including negation, reaches independent classification.
+Offline read-only replay of the saved private preview artifact with both saved
+query cells passed six controlled cases: lexical hit at 0.499999 admits to a
+mocked classifier; without a lexical hit it rejects; 0.5 preserves vector
+admission. These are synthetic scores, not the unavailable actual score. No
+private source body or provider output was added to fixtures or documentation.
+
+Focused checks: 80 passed, 1 skipped, 42 subtests passed. Final full suite:
+1,264 passed, 1 skipped, 363 subtests passed, with two dependency deprecation
+warnings. Native UI contract script and `git diff --check` passed. All validation
+processes exited; no background service was started. Offline package build
+remains blocked by missing `setuptools.build_meta`
+in the prescribed environment; no dependency installation was attempted.
+Iteration 2 still needs dedicated lexical-route fairness/OR/AND, shared-budget,
+late failure/cancellation/timeout controls and the final correction review.
+Root owns independent review, actual native acceptance and integration. The
+orchestrator owns commits; this worker creates no commit. No actual model,
+network, embedding, intake or browser acceptance is claimed.
+
+## Prior checkpoint — query-scoped correction and control hardening
 
 Fresh compaction is active v3, including complete reservations and batch privacy
 checks. The earlier durable-dispatch checkpoint below is historical, not the

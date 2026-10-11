@@ -188,3 +188,31 @@ and the absolute deadline remain unchanged.
 Full deterministic mock migration and suite/native UI contract verification are
 required for completion. Actual model, native intake, 1200/100K fidelity,
 build/artifact/install and release acceptance remain separately owned gates.
+
+## Joint checked-source lexical candidate admission
+
+An actual hit in the existing bounded backend lexical pool can also pass the
+rank gate when one current, validated, in-window v3 source quotation contains
+all non-scaffolding query tokens. At least two distinct tokens must be ASCII
+alphabetic words of three or more letters, excluding context identity/service
+labels and identifier-like tokens. Matching uses whole casefolded word tokens,
+keeping internal identifier punctuation; there is no stemming, synonym expansion,
+partial-word matching, or stitching across quotations or records.
+
+The closed English scaffolding list in `retriever.py` excludes grammatical and
+question framing words, generic log/evidence/measurement vocabulary, and temporal
+and negative operators. Those operators remain verbatim in the classifier's
+question. Every other token, including any additional topic, must occur in the
+same quote. Context labels and numeric/identifier tokens cannot supply the two
+meaningful words. Renderer prose, counts, notices, hashes, fields and historical
+unchecked summaries supply no quotation support. Other summary representations
+retain their existing behavior; they have no new authenticated-quotation bypass.
+
+This is candidate admission only. The cosine floor remains 0.5, and existing
+exact-field/strong-identifier routes and subsequent literal eligibility are
+unchanged. Same-field OR, different-field AND, absent-ID exclusion and fair
+service/source and literal-witness ordering still apply before caps. Native
+limits remain 6 candidates/cell, 3 selected/cell, 8 globally, 8 classification
+calls and the shared absolute 60-second deadline. All transport/output limits
+and strict independent positive-label/confidence requirements remain unchanged;
+negative, invalid, cancelled or timed-out classification supplies no fallback.
