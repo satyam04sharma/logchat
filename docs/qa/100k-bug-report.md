@@ -233,3 +233,14 @@ The fresh exact `INC_CORRELATION_73` query then measured 5,655 rendered input to
 Strict selection, confidence, citation, scope, canonical bindings and provider counter checks passed. The selected services were web and worker; auth was missing. Selected precision was 1.0, while this finite fixture's recall and source coverage were both 2/3. The quality gate correctly failed. Canonical chunks, coverage and event ledgers, the original index and previous artifacts remained unchanged.
 
 This establishes the transport correction for the measured cases and a distinct remaining model relevance omission. It does not establish passing retrieval, global recall or prose entailment. No fresh cross-service generation followed the failed exact query. Model-contract query generations now total ten, including the earlier failed helpers; the additional overflow endpoint was rejected and is accounted separately. Fresh compaction proofs remain zero. Diagnose the omitted-source decision and preserve the unchanged acceptance gates before any new simulation or publication claim.
+
+
+## Bare-identifier clarification did not restore actual auth recall
+
+Offline reconstruction reproduced the first full-fit request's exact hash. Worker, auth and web candidates contain one, one and 33 records respectively; each has the incident identifier at retained record index zero, and all three fit the three-selection cap. The initial prompt did not explicitly define a bare identifier's topic as lookup of that identifier across scoped sources.
+
+The minimal reviewed clarification adds that definition while retaining additional topic/action/status/service/environment/period constraints for mixed questions. No classifier, forced positive decision, response repair, scope relaxation or budget increase was added. Four new structural regressions and the full 1,058-test suite pass. The host separately passes 52 tests and 123 subtests for intent, exact remapping and existing strict gates.
+
+Its actual exact query still fails. The complete 5,756-token prompt plus 1,200-token reserve fits, provider input counts match exactly, and normal stop/strict labels/citations/canonical checks pass. The safe decision audit now records worker as `topic_match`, auth as `not_relevant`, and web as `topic_match`, all at uncalibrated confidence 1.0. Selected precision remains 1.0 and finite recall/source coverage remain 2/3. The explanation gap was real, but this clarification is insufficient to establish model quality.
+
+This failed proof is retained. Model-contract query generations now total eleven; fresh compaction proof attempts remain zero. Escalated review must distinguish bulk/position effects from semantic misclassification with a bounded, preflighted diagnostic before choosing a further correction. Repeating the unchanged query, accepting two-service coverage or auto-promoting the rejected candidate would not satisfy release acceptance.
