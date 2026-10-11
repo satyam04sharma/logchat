@@ -159,7 +159,7 @@ Two bounded actual model probes reconstructed the original failed requests witho
 
 The delegated candidate adds strict duplicate JSON-key rejection before parsing and a required, independently addressed judgement for each admitted candidate. Independent reviews pass key membership, reason/boolean/confidence checks, caps before confidence filtering, joint schema/input budgets, immutable record references and existing literal/source-fairness rules. The candidate suite passes 836 tests and 273 subtests, with one opt-in model test skipped.
 
-Actual native exact-incident retrieval then selected three distinct services with complete citations on a disposable copy of the preserved index. The cross-service question still failed `invalid_model_selection` with three admitted candidates. The underlying rejection category was not captured and remains a required bounded diagnostic. This is a partial correction, not a passing pilot. That proof consumed three query generations: one harness citation-key error, then the two measured queries. Failed artifacts remain preserved; the original index files are unchanged.
+Actual native exact-incident retrieval then selected three distinct services with complete citations on a disposable copy of the preserved index. The cross-service question still failed `invalid_model_selection` with three admitted candidates. The first proof did not capture the underlying rejection category. A later verified diagnostic confirms incompatible judgement reasons and selection flags, as described below. This remains a partial correction, not a passing pilot. That proof consumed three query generations: one harness citation-key error, then the two measured queries. Failed artifacts remain preserved; the original index files are unchanged.
 
 ## Compaction discards per-event measurement associations
 
@@ -170,3 +170,14 @@ Independent prose review found that the selected web summary assigns HTTP 504 to
 A sampled auth summary also asserts “30 consecutive” events, although 24 source events intervene between its first and last grouped records. Its 1,527 ms summed work is distinct from the 53 ms observed span. Semantic grouping does not establish source adjacency. Instructions now prohibit that inference; tests and actual separated-run prose checks must preserve the distinction.
 
 Acceptance includes fresh actual mixed-status and separated-auth compaction checks, explicit unverified-summary labeling and exact selected-section status distribution beside readable metrics. Disclosure does not cure contradictory prose, and structural evidence selection cannot establish entailment. The fresh pilot and 100K release gates remain unchanged.
+
+
+## Fixed-key judgement compatibility failure
+
+The first follow-up diagnostic consumed one model call but failed to install its validator wrapper. It therefore established no exact internal reason and remains failed evidence. The host stopped that GNHF run before further work. A separate QA-only probe preserved the failed helper and report, verified wrapper installation and exception rethrowing across eight controlled cases without network/model calls, then ran one authorized actual query on a new disposable copy.
+
+That verified call invoked the original validator once. It returned three judgement entries for three admitted candidates, with zero missing or extra keys, no field-shape mismatches and valid numeric confidence values. Two judgement reasons were incompatible with their selected flags. The strict validator rejected the response with `selection_membership_violation`; zero evidence was selected. The fixed-key schema permits independently valid booleans and reason enums whose combinations violate the later contract. This is an exact confirmed response-contract failure, separate from the earlier duplicate references.
+
+The next delegated correction must remove or structurally prevent those contradictory combinations. It must preserve model-driven relevance, exact candidate membership, strict JSON-key rejection, confidence validation on every decision, selection caps before confidence filtering, citation/scope checks and the joint input/schema budgets. Invalid old responses cannot be repaired or promoted. Actual exact-incident and cross-service proofs, corrected fresh prose checks, a fresh pilot and the full 100K cycle remain required.
+
+At this point the GNHF/verified follow-up phase has consumed five query generation calls; the three earlier original/prefix diagnostics are additional. These counts include both harness failures. No fresh compaction proof attempts have yet been consumed. Original failed state and diagnostic artifacts remain unchanged.
