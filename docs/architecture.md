@@ -21,6 +21,8 @@ Generation uses one model profile across grouping, summary and relevance roles. 
 
 Provider observation cursors and file positions identify what an adapter has accepted. The scheduler tracks durable jobs and indexing separately. A captured window does not establish complete coverage; a successful source connection does not establish that retrieval is ready. Invalid output and failed model calls retain gaps and do not publish candidates as selected evidence.
 
+Temporary-original capture claims rotate over ready owner/project/environment/source scopes using a durable cursor. Each scope has at most one active claim; delayed retries and active leases let other scopes proceed. The 400-event claim and byte limits still apply. This bounds turns among ready captured sources across restart, but does not make the separate summary-only intake semaphore fair or reduce model processing time.
+
 Readable memory contains model-written compact text, selected original values, scope, timestamps, exact measurements and loss notes. Code validates selected values and membership; prose itself is an unverified model interpretation. Native vector search uses exact eligible-vector cosine similarity, with lexical candidates combined by reciprocal rank fusion. Ranking is not calibrated confidence.
 
 Output is retrieved context, not generated solutions. The read-only project-bound MCP lets the requesting agent inspect supporting memories. Source and settings changes are local authenticated control operations. Provider credentials live separately from event memory, and token values are never in source status.

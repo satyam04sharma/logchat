@@ -162,6 +162,12 @@ class CaptureSpool:
                     attempts INTEGER NOT NULL DEFAULT 0, last_failure TEXT, complete INTEGER NOT NULL DEFAULT 0);
                 CREATE INDEX IF NOT EXISTS raw_ready ON raw_events(complete,available_at,captured_at);
                 CREATE INDEX IF NOT EXISTS raw_project ON raw_events(project_id);
+                CREATE INDEX IF NOT EXISTS raw_scope ON raw_events(
+                    owner_id,project_id,environment_id,source_id,complete,lease_until);
+                CREATE TABLE IF NOT EXISTS raw_claim_cursor(
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                    owner_id TEXT NOT NULL, project_id TEXT NOT NULL,
+                    environment_id TEXT NOT NULL, source_id TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS raw_counts(
                     project_id TEXT PRIMARY KEY, accepted_events INTEGER NOT NULL DEFAULT 0,
                     completed_events INTEGER NOT NULL DEFAULT 0, expired_events INTEGER NOT NULL DEFAULT 0,
@@ -282,8 +288,21 @@ class CaptureSpool:
         now = time.time() if now is None else now
         with self._connection() as connection:
             self._expire(connection, now, load_capture_policy(self.state_dir))
-            first = connection.execute("""SELECT * FROM raw_events WHERE complete=0 AND available_at<=?
-                AND (lease_until IS NULL OR lease_until<=?) ORDER BY captured_at,event_key LIMIT 1""", (now, now)).fetchone()
+            # One durable cursor, not a queue of waiting originals or an
+            # ever-growing per-source history. Ready scopes take cyclic turns;
+            # retry-delayed and actively leased scopes do not block others.
+            cursor = connection.execute("""SELECT owner_id,project_id,environment_id,source_id
+                FROM raw_claim_cursor WHERE singleton=1""").fetchone()
+            previous = tuple(cursor) if cursor is not None else ("", "", "", "")
+            first = connection.execute("""SELECT DISTINCT e.owner_id,e.project_id,e.environment_id,e.source_id
+                FROM raw_events e WHERE e.complete=0 AND e.available_at<=?
+                AND (e.lease_until IS NULL OR e.lease_until<=?)
+                AND NOT EXISTS(SELECT 1 FROM raw_events active WHERE active.complete=0
+                    AND active.lease_until>? AND active.owner_id=e.owner_id AND active.project_id=e.project_id
+                    AND active.environment_id=e.environment_id AND active.source_id=e.source_id)
+                ORDER BY CASE WHEN (e.owner_id,e.project_id,e.environment_id,e.source_id)>(?,?,?,?)
+                    THEN 0 ELSE 1 END,e.owner_id,e.project_id,e.environment_id,e.source_id LIMIT 1""",
+                (now, now, now, *previous)).fetchone()
             if first is None:
                 return None
             scope = tuple(first[name] for name in ("owner_id", "project_id", "environment_id", "source_id"))
@@ -301,6 +320,8 @@ class CaptureSpool:
                 keys.append(row["event_key"])
                 connection.execute("UPDATE raw_events SET lease_token=?,lease_until=? WHERE event_key=?",
                                    (token, now + lease_seconds, row["event_key"]))
+            connection.execute("""INSERT OR REPLACE INTO raw_claim_cursor
+                (singleton,owner_id,project_id,environment_id,source_id) VALUES(1,?,?,?,?)""", scope)
             return CaptureClaim(token, SourceIdentity(*scope), tuple(events), tuple(keys))
 
     def complete(self, claim: CaptureClaim) -> int:
