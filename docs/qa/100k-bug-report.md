@@ -1,6 +1,6 @@
 # 100K pipeline bug report
 
-Current release status: **not ready to publish as a validated 100K demo**. The earlier installed-browser cycle passed all 20 checks. The fresh three-application pilot captured and summarized all 1,200 events, but indexed only 800 because the auth embedding job exceeded the selected model's token context. The independently reviewed embedding correction recovered a disposable copy to 1,200 indexed events without regenerating summaries. The retrieval cap correction also passed independent structural review. A fresh installed-browser cycle, passing pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
+Current release status: **not ready to publish as a validated 100K demo**. Installed Chrome cycle 3 passed all 20 checks. Fresh three-application pilot cycle 2 captured and indexed all 1,200 events in 44 native memories, with exact canonical ledger reconciliation and restart/replay checks passing. However, its cross-service and exact-incident queries failed strict model-selection validation despite receiving all three relevant candidates. The pilot therefore failed acceptance. Exact response diagnosis, a reviewed correction, a passing fresh pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
 
 | Finding | Current evidence/status |
 | --- | --- |
@@ -11,10 +11,11 @@ Current release status: **not ready to publish as a validated 100K demo**. The e
 | Diagnostic failures leak the intake slot or replace cancellation | Corrected; fault regressions pass |
 | Partial repeated-memory selection | Corrected instruction contract; fresh installed Chrome selects/copies both memories |
 | Browser query races independently queued auth intake | QA readiness corrected; fresh cycle passes 20 checks |
-| Auth embedding token overflow hidden by generic failure | Corrected candidate and independently reviewed actual recovery; fresh full simulation remains required |
+| Auth embedding token overflow hidden by generic failure | Corrected; fresh pilot cycle 2 indexes all 400 auth events and all 1,200 total events |
 | Repeated incident candidates crowd out a requested service | Corrected candidate; independent crowding, joint-match and comparison-alternative probes pass |
 | Incomplete vector/citation acceptance checks | QA corrected; corruption probes reject incomplete evidence |
 | Digest ledger only counted, not fully reconciled | QA corrected; all canonical values/scopes/job bindings checked and seven corruption probes rejected |
+| Actual multi-service model selection fails validation | New blocking finding in fresh pilot cycle 2; exact response diagnosis in progress |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
@@ -138,3 +139,14 @@ The integrated candidate uses durable `compact-evidence-v2` to select the refs-o
 Explicit authenticated failed-job retry authorizes a leased v1-to-v2 upgrade. Typed canonical validation permits only the evidence version and derived chunk-ID changes, preserving the initial intake hash and exact canonical key/digest ledgers. Expired/stale/unleased/published work cannot use this path. Independent review also verified that a successful first vector request followed by overflow in a later request publishes zero vectors.
 
 Actual disposable-copy recovery added 16 real 768-dimensional nomic vectors, reaching 1,200 indexed events and 44 vectors across three completed jobs. Independent read-only comparison confirms the original 28 payload/vector pairs, all 1,200 keys and digests, initial hashes and model spec are unchanged. No summary generation occurred. The original failed pilot is preserved. Two earlier disposable attempts recovered successfully but their audit helpers failed while decoding cleared completed-job payloads; all three attempts and their total 48 document-vector requests are disclosed. Fresh generation, actual model relevance and full 100K completion remain separate release gates. Exact tokenizer preflight is deferred; arbitrary oversized retained semantic inputs still fail closed.
+
+
+## Fresh pilot cycle 2: complete indexing, invalid multi-service selection
+
+The rebuilt installed candidate passed 815 tests and 256 subtests, with one opt-in model test skipped, plus the installed 28 CLI/adapter contracts and all 20 fresh Chrome checks. The fresh three-producer pilot then generated and captured exactly 1,200 unique synthetic events, 400 per application, and published 44 native chunks with 44 corresponding 768-dimensional vectors. All three jobs completed; pending, failed, dropped and expired event counts were zero. Every canonical event key and content digest, per-source event ID, status count and duration total reconciled. Original-credential restart and replay passed, including 48-event deduplication and source-auth isolation.
+
+Observed indexing took 593.770 seconds from first smoke submission, including polling and the pending-drain query. Validation took 820.651 seconds before cleanup. These are shared-localhost observations, not production throughput estimates. Owned producers and the owned server stopped after reporting.
+
+Fifteen of the seventeen final query checks passed. The pending-drain web query also passed while 400 events remained queued. The cross-service incident question and exact incident identifier both failed with `remapper_invalid_model_selection`. Each actual request supplied all three eligible service memories within the existing input budget, but no model selection survived strict validation. Candidate availability therefore does not establish usable multi-service context. The failed pilot remains failed; storage completeness does not override the retrieval gate.
+
+Static review narrows the remaining failure to the model-selection response contract, but does not establish its exact cause. A bounded read-only actual-model probe must record a content-free validation reason before choosing a correction. Preserve strict confidence, reference uniqueness, cell membership, scope, citation and budget checks; do not promote candidates or weaken acceptance to hide the failure. A fresh full simulation remains required after correction.
