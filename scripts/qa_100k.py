@@ -60,12 +60,17 @@ def counts(state):
 
 def reconcile(state, configs):
     """Verify source metrics and exact IDs independently of query/model selection."""
+    from importlib.util import spec_from_file_location,module_from_spec
+    from connectors.local import parse_push_events
+    from logchat.local.raw_capture import content_digest
     from logchat.rag.builder import event_key
     from logchat.rag.contracts import SourceIdentity
     from logchat.rag.scheduler import _identity_key
     db=sqlite3.connect(f'file:{state}/rag.db?mode=ro',uri=True)
     db.row_factory=sqlite3.Row
-    results=[]
+    spec=spec_from_file_location('qa_100k_accounting_producer',ROOT/'examples/loadtest/producer.py')
+    producer=module_from_spec(spec); spec.loader.exec_module(producer)
+    results=[]; expected_ledger={}
     for config in configs:
         rows=db.execute('SELECT payload FROM rag_chunks WHERE source_id=?',(config['source_id'],)).fetchall()
         values=[json.loads(row['payload']) for row in rows]
@@ -83,13 +88,40 @@ def reconcile(state, configs):
         observed_ids={record['event_id'] for record in metadata}
         identity=SourceIdentity('local-os-user',config['project_id'],config['environment_id'],config['source_id'])
         keys={event_key(identity,identifier) for identifier in expected_ids}
-        observed_keys={row[0] for row in db.execute('SELECT event_key FROM rag_schedule_event_keys WHERE scope=?',(_identity_key(identity),))}
+        scope=_identity_key(identity)
+        # Reproduce the unchanged producer -> actual HTTP parser -> canonical
+        # digest path. Never create a second normalization rule or store bodies.
+        expected_digests={}
+        for index in range(size):
+            parsed=parse_push_events([producer.event(config,index)],source=config['source_id'],preserve_fields=True)[0]
+            expected_digests[event_key(identity,parsed.event_id)]=content_digest(parsed)
+        expected_ledger.update({(scope,key):digest for key,digest in expected_digests.items()})
+        observed_keys={row[0] for row in db.execute('SELECT event_key FROM rag_schedule_event_keys WHERE scope=?',(scope,))}
+        observed_digests={row[0]:row[1] for row in db.execute('SELECT event_key,content_digest FROM rag_schedule_event_digests WHERE scope=?',(scope,))}
         scope_valid=all(chunk['identity']==dict(owner_id=identity.owner_id,project_id=identity.project_id,environment_id=identity.environment_id,source_id=identity.source_id) for chunk in values)
         result=dict(app=config['app'],expected_events=size,indexed_events=sum(c['metrics']['event_count'] for c in values),metadata_records=len(metadata),unique_metadata_ids=len(observed_ids),missing_ids=len(expected_ids-observed_ids),unexpected_ids=len(observed_ids-expected_ids),scope_valid=scope_valid,event_keys_match=bool(keys) and keys==observed_keys,duration_sum_ms=duration,expected_duration_sum_ms=expected_duration,status_counts=dict(statuses),expected_status_counts=expected_statuses)
-        result['passed']=result['indexed_events']==size and len(metadata)==size and observed_ids==expected_ids and result['event_keys_match'] and scope_valid and duration==expected_duration and dict(statuses)==expected_statuses
+        result.update(event_digest_keys_match=keys==set(observed_digests),
+            canonical_event_digests_match=expected_digests==observed_digests,
+            missing_event_digests=len(keys-set(observed_digests)),unexpected_event_digests=len(set(observed_digests)-keys),
+            changed_event_digests=sum(observed_digests[key]!=digest for key,digest in expected_digests.items() if key in observed_digests))
+        result['passed']=result['indexed_events']==size and len(metadata)==size and observed_ids==expected_ids and result['event_keys_match'] and result['event_digest_keys_match'] and result['canonical_event_digests_match'] and scope_valid and duration==expected_duration and dict(statuses)==expected_statuses
         results.append(result)
+    all_keys={(row[0],row[1]) for row in db.execute('SELECT scope,event_key FROM rag_schedule_event_keys')}
+    all_digests={(row[0],row[1]):row[2] for row in db.execute('SELECT scope,event_key,content_digest FROM rag_schedule_event_digests')}
+    target=sum(config['count'] for config in configs)
+    invalid_key_jobs=db.execute('''SELECT count(*) FROM rag_schedule_event_keys k
+        LEFT JOIN rag_schedule_jobs j ON j.job_id=k.job_id WHERE j.job_id IS NULL OR j.scope!=k.scope''').fetchone()[0]
+    invalid_digest_jobs=db.execute('''SELECT count(*) FROM rag_schedule_event_digests d
+        LEFT JOIN rag_schedule_jobs j ON j.job_id=d.job_id WHERE j.job_id IS NULL OR j.scope!=d.scope''').fetchone()[0]
+    mismatched_jobs=db.execute('''SELECT count(*) FROM rag_schedule_event_keys k JOIN rag_schedule_event_digests d
+        ON d.scope=k.scope AND d.event_key=k.event_key WHERE d.job_id!=k.job_id''').fetchone()[0]
+    ledger=dict(expected_events=target,event_keys=len(all_keys),event_digests=len(all_digests),
+        event_keys_match=all_keys==set(expected_ledger),canonical_event_digests_match=all_digests==expected_ledger,
+        unexpected_key_scope_pairs=len(all_keys-set(expected_ledger)),unexpected_digest_scope_pairs=len(set(all_digests)-set(expected_ledger)),
+        invalid_key_job_bindings=invalid_key_jobs,invalid_digest_job_bindings=invalid_digest_jobs,mismatched_key_digest_jobs=mismatched_jobs)
+    ledger['passed']=len(expected_ledger)==target and len(all_keys)==target and len(all_digests)==target and ledger['event_keys_match'] and ledger['canonical_event_digests_match'] and not (invalid_key_jobs or invalid_digest_jobs or mismatched_jobs)
     db.close()
-    return dict(passed=all(result['passed'] for result in results),sources=results)
+    return dict(passed=ledger['passed'] and all(result['passed'] for result in results),sources=results,ledger=ledger)
 
 def context_quality(state, configs, label, answer, service=None, expected_ids_override=None):
     """Score generated support against durable IDs, not model confidence."""

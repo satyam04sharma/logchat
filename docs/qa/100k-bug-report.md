@@ -1,5 +1,23 @@
 # 100K pipeline bug report
 
+Current release status: **not ready to publish as a validated 100K demo**. The latest installed-browser cycle passed all 20 checks. The fresh three-application pilot captured and summarized all 1,200 events, but indexed only 800 because the auth embedding job exceeded the selected model's token context. A delegated correction is in progress; a fresh passing pilot and fully indexed 100K rehearsal remain required before GitHub review and merge.
+
+| Finding | Current evidence/status |
+| --- | --- |
+| Unrelated context for absent identifiers | Corrected; independently reviewed retrieval regressions pass |
+| Native source counts report zero | Corrected; installed contracts pass |
+| Source starvation and redundant preparation | Corrected candidate; real canonical HTTP400 completes in 184.546 seconds |
+| Introduced replay identity regression | Withheld and corrected; historical replay/restart checks pass |
+| Diagnostic failures leak the intake slot or replace cancellation | Corrected; fault regressions pass |
+| Partial repeated-memory selection | Corrected instruction contract; fresh installed Chrome selects/copies both memories |
+| Browser query races independently queued auth intake | QA readiness corrected; fresh cycle passes 20 checks |
+| Auth embedding token overflow hidden by generic failure | Open blocking correction; actual refs-only diagnostic embeds all 16 auth memories |
+| Incomplete vector/citation acceptance checks | QA corrected; corruption probes reject incomplete evidence |
+| Digest ledger only counted, not fully reconciled | QA corrected; all canonical values/scopes/job bindings checked and seven corruption probes rejected |
+| Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
+
+The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
+
 The native candidate at `1542801` admitted 100,000 synthetic Loghub-template replicas across three independent simulators, but its first 400-event compaction claim failed and none of the burst became searchable. A smaller 288-event run indexed successfully and returned cited context across all three services. The following findings block the requested release acceptance.
 
 ## Absent identifiers return unrelated evidence
@@ -99,3 +117,5 @@ The failed auth batch passes compact validation and contains 16 complete memorie
 A read-only actual-model diagnostic removed only `event_refs` bookkeeping from the semantic embedding input, retaining every original selected key/value and exact metric. All 16 inputs then embedded successfully at 768 dimensions without truncation; full catalogs and their reference bindings in durable state were unchanged. This is a diagnostic projection, not an integrated fix or passing pilot. The correction must explicitly bind embedding projection identity, keep existing vectors and canonical replay compatible, preserve every durable source field/ref, expose a safe context-limit failure category, and revalidate the three-application pilot and full 100K cycle.
 
 The harness now stops draining when an embedding job is terminally failed instead of waiting out the drain budget. This does not relax acceptance: a failed or unindexed job still fails the rehearsal.
+
+Independent full-run preflight found another acceptance-checker gap: digest rows were counted without checking every canonical value. The harness now regenerates each synthetic event in memory through the unchanged HTTP parser and checks exact per-source/global digest values, source scopes, target counts and matching job bindings. Seven disposable-copy corruptions are rejected. Read-only reconciliation confirms all 1,200 digests in the preserved failed pilot match; that pilot still fails because 400 auth events remain unindexed. This correction improves the release gate and does not claim an additional runtime data-loss bug.
