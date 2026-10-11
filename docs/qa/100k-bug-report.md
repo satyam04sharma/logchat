@@ -12,6 +12,7 @@ Current release status: **not ready to publish as a validated 100K demo**. The l
 | Partial repeated-memory selection | Corrected instruction contract; fresh installed Chrome selects/copies both memories |
 | Browser query races independently queued auth intake | QA readiness corrected; fresh cycle passes 20 checks |
 | Auth embedding token overflow hidden by generic failure | Open blocking correction; actual refs-only diagnostic embeds all 16 auth memories |
+| Repeated incident candidates crowd out a requested service | Open blocking correction; structural twelve-memory fixture excludes auth before selection |
 | Incomplete vector/citation acceptance checks | QA corrected; corruption probes reject incomplete evidence |
 | Digest ledger only counted, not fully reconciled | QA corrected; all canonical values/scopes/job bindings checked and seven corruption probes rejected |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
@@ -119,3 +120,9 @@ A read-only actual-model diagnostic removed only `event_refs` bookkeeping from t
 The harness now stops draining when an embedding job is terminally failed instead of waiting out the drain budget. This does not relax acceptance: a failed or unindexed job still fails the rehearsal.
 
 Independent full-run preflight found another acceptance-checker gap: digest rows were counted without checking every canonical value. The harness now regenerates each synthetic event in memory through the unchanged HTTP parser and checks exact per-source/global digest values, source scopes, target counts and matching job bindings. Seven disposable-copy corruptions are rejected. Read-only reconciliation confirms all 1,200 digests in the preserved failed pilot match; that pilot still fails because 400 auth events remain unindexed. This correction improves the release gate and does not claim an additional runtime data-loss bug.
+
+## Repeated incident candidates crowd out a requested service
+
+The full fixture injects four shared-incident observations per application. Independent structural review constructed twelve valid compact incident memories in memory, four each for web, worker and auth, without changing persisted state or calling a production model. The cross-service question plans one environment/period cell. Ranking lacks service/source diversity; remapping supplies only the first six candidates. An allowed order of four web followed by four worker followed by four auth therefore supplies four web and two worker memories, leaving auth unavailable to any relevance model. The input fits the preserved-content budget, so this is a candidate-limit issue rather than input overflow. Unrelated vector neighbors can also occupy ranking slots before exact-value eligibility is applied.
+
+Acceptance: preserve question-derived exact eligibility, then provide bounded fair service/source representation. Explicitly requested multi-service breadth must guide model selection before repeated observations within one service. Keep model relevance, confidence, scope, citation and input/output limits; do not fabricate selections or silently raise every cap. Insufficient validated coverage must remain explicit partial context and fail the three-service rehearsal gate. Structural tests do not substitute for fresh actual-model retrieval. The one-incident-per-application pilot alone cannot establish this scale behavior.
