@@ -229,6 +229,61 @@ async def test_async_intake_has_bounded_concurrency_and_releases_slot_after_fail
 
 
 @pytest.mark.asyncio
+async def test_summary_only_sources_take_reserved_retry_turns_across_entrypoints(configured, monkeypatch):
+    from logchat.local import rag_runtime
+    from logchat.rag.scheduler import _identity_key
+    monkeypatch.setattr(rag_runtime, "_INTAKE_SLOT", rag_runtime._FairIntakeSlot())
+    store, project, hot, model = configured
+    cold = store.create_source(project["id"], "cold", "dev", "push", None)
+    third = store.create_source(project["id"], "third", "dev", "push", None)
+    model.started, model.release = asyncio.Event(), asyncio.Event()
+    task = asyncio.create_task(store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot)]))
+    await model.started.wait()
+    for source in (cold, third, cold):
+        with pytest.raises(ModelUnavailable, match="intake_busy"):
+            await store.rag_runtime.ingest_async(project["id"], source["id"], [event(source)])
+    model.release.set()
+    await task
+    model.started = None
+    with pytest.raises(ModelUnavailable, match="intake_busy"):
+        store.rag_runtime.ingest(project["id"], hot["id"], [event(hot, identifier="hot-second")])
+    # A synchronous retry consumes the same reservation as async ingestion.
+    cold_receipt = await asyncio.to_thread(store.rag_runtime.ingest, project["id"], cold["id"], [event(cold)])
+    assert cold_receipt["accepted"] == 1
+    with pytest.raises(ModelUnavailable, match="intake_busy"):
+        await store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot, identifier="hot-second")])
+    assert (await store.rag_runtime.ingest_async(project["id"], third["id"], [event(third)]))["accepted"] == 1
+    assert (await store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot, identifier="hot-second")]))["accepted"] == 1
+    for source, expected in ((hot, 2), (cold, 1), (third, 1)):
+        identity = store.rag_runtime.identity(project["id"], source["id"])
+        with store.rag_runtime.backend.connect() as connection:
+            assert connection.execute("SELECT count(*) FROM rag_schedule_event_digests WHERE scope=?", (_identity_key(identity),)).fetchone()[0] == expected
+    assert_no_originals(store)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_intake_releases_slot_to_waiting_source(configured, monkeypatch):
+    from logchat.local import rag_runtime
+    monkeypatch.setattr(rag_runtime, "_INTAKE_SLOT", rag_runtime._FairIntakeSlot())
+    store, project, hot, model = configured
+    cold = store.create_source(project["id"], "cold", "dev", "push", None)
+    model.started, model.release = asyncio.Event(), asyncio.Event()
+    task = asyncio.create_task(store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot)]))
+    await model.started.wait()
+    with pytest.raises(ModelUnavailable, match="intake_busy"):
+        await store.rag_runtime.ingest_async(project["id"], cold["id"], [event(cold)])
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    model.started = None
+    with pytest.raises(ModelUnavailable, match="intake_busy"):
+        await store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot)])
+    assert (await store.rag_runtime.ingest_async(project["id"], cold["id"], [event(cold)]))["accepted"] == 1
+    assert (await store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot)]))["accepted"] == 1
+    assert_no_originals(store)
+
+
+@pytest.mark.asyncio
 async def test_file_watcher_retries_top_level_poll_failure_without_crashing(configured, monkeypatch):
     store, _, _, _ = configured
     capture = FileCapture(store)

@@ -13,15 +13,60 @@ import json
 import os
 from pathlib import Path
 import threading
+import time
 
 from logchat.rag.contracts import EmbeddingSpec, SourceIdentity, TimeWindow
 from logchat.rag.scheduler import SQLiteSchedulerStore
 
 
 CONFIG_FILE = "rag.json"
+
+
+class _FairIntakeSlot:
+    """Nonblocking retry turns; store only bounded source keys, never events.
+
+    Retrying sources keep their FIFO position. Abandoned turns expire so a
+    disconnected producer cannot indefinitely prevent intake or settings edits.
+    Anonymous users (settings and capture drain) share exclusion and cannot
+    jump ahead of live source retries.
+    """
+
+    def __init__(self, *, max_waiters=256, retry_seconds=10, clock=time.monotonic):
+        self._lock = threading.Lock()
+        self._held = False
+        self._waiting = {}
+        self._max_waiters = max_waiters
+        self._retry_seconds = retry_seconds
+        self._clock = clock
+
+    def acquire(self, blocking=False, *, scope=None):
+        if blocking:
+            raise ValueError("intake_slot_requires_nonblocking_retry")
+        with self._lock:
+            now = self._clock()
+            self._waiting = {key: stamp for key, stamp in self._waiting.items()
+                             if now - stamp < self._retry_seconds}
+            if scope is not None:
+                if scope not in self._waiting and len(self._waiting) >= self._max_waiters:
+                    return False
+                self._waiting[scope] = now
+            if self._held or (self._waiting and next(iter(self._waiting)) != scope):
+                return False
+            if scope is not None:
+                del self._waiting[scope]
+            self._held = True
+            return True
+
+    def release(self):
+        with self._lock:
+            if not self._held:
+                raise ValueError("intake_slot_released_without_reservation")
+            self._held = False
+
+
 # One in-memory original-event intake at a time across sync/async entrypoints.
 # Busy callers retry; the executor never accumulates an unbounded raw work queue.
-_INTAKE_SLOT = threading.BoundedSemaphore(1)
+_INTAKE_SLOT = _FairIntakeSlot()
 # Short raw admission must keep working while the model consumes another batch.
 _CAPTURE_SLOT = threading.BoundedSemaphore(1)
 _INTAKE_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="logchat-intake")
@@ -179,6 +224,12 @@ class NativeRAGRuntime:
             raise ValueError("Source is not part of this project.")
         return SourceIdentity("local-os-user", project_id, source["environment_id"], source_id)
 
+    def _reserve_intake(self, project_id, source_id):
+        identity = self.identity(project_id, source_id)
+        # Different local stores may use the same source IDs in one process.
+        scope = (str(self.store.state_dir.resolve()), identity)
+        return _INTAKE_SLOT.acquire(blocking=False, scope=scope)
+
     def ingest(self, project_id: str, source_id: str, events) -> dict:
         """Synchronous adapters use a bounded bridge; async adapters should await ingest_async."""
         from .raw_capture import load_capture_policy
@@ -190,7 +241,7 @@ class NativeRAGRuntime:
             raise ModelUnavailable("model_not_configured")
         if not self.preserve_content:
             return self._ingest_redacted(project_id, source_id, events)
-        if not _INTAKE_SLOT.acquire(blocking=False):
+        if not self._reserve_intake(project_id, source_id):
             raise ModelUnavailable("intake_busy_retry_required")
         try:
             asyncio.get_running_loop()
@@ -215,7 +266,7 @@ class NativeRAGRuntime:
             raise ModelUnavailable("model_not_configured")
         if not self.preserve_content:
             return self._ingest_redacted(project_id, source_id, events)
-        if not _INTAKE_SLOT.acquire(blocking=False):
+        if not self._reserve_intake(project_id, source_id):
             raise ModelUnavailable("intake_busy_retry_required")
         return await self._ingest_reserved(project_id, source_id, events)
 
