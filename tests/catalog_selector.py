@@ -1,8 +1,11 @@
 """Protocol-aware positive mock: missing intended topics fail loudly."""
+from logchat.rag.compact_input import expand_compact_input
 from logchat.rag.source_catalog import SELECTOR_PROTOCOL
 
 
 def select_topics(payload, topics, *, fields=False, allow_absent_topics=False):
+    if 'input_projection' in payload:
+        payload = expand_compact_input(payload)
     assert payload['selector_protocol'] == SELECTOR_PROTOCOL
     selected = []
     for topic in topics:

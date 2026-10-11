@@ -1,4 +1,5 @@
 """Actual fresh compaction seam and active consumers, with deterministic models."""
+from logchat.rag.compact_input import expand_compact_input
 from tests.physical_preflight import SyntheticPhysicalPreflight
 from copy import deepcopy
 from dataclasses import asdict, replace
@@ -56,7 +57,7 @@ async def test_35_record_actual_route_membership_and_complete_reservations(first
     assert evidence['version'] == COMPACT_EVIDENCE_V3
     assert [o['exact_metrics']['event_count'] for o in evidence['source_observations']] == [first, 35-first]
     for o in evidence['source_observations']:
-        expected = [row['ref'] for row in selector.calls[0][1]['records'] if o['text'] in row['message']]
+        expected = [row['ref'] for row in expand_compact_input(selector.calls[0][1])['records'] if o['text'] in row['message']]
         assert o['event_refs'] == expected
         assert {k: o[k] for k in ('exact_metrics', 'observed_window')} == _facts([
             row for row in evidence['records'] if row['ref'] in expected])
@@ -118,7 +119,7 @@ async def test_atomic_union_across_packed_chunks_includes_nonwitness_body(monkey
     class Across(Selector):
         async def generate(self, instruction, payload, schema):
             self.calls.append(payload)
-            text = payload['records'][0]['message']
+            text = expand_compact_input(payload)['records'][0]['message']
             chosen = 'alpha' if text.startswith('alpha extra') else 'beta' if text.startswith('beta extra') else None
             return {'source_phrases': [{'record_ref': 'e0', 'text': chosen}] if chosen else [], 'important_fields': []}
 

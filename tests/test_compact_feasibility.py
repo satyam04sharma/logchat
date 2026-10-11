@@ -63,7 +63,8 @@ async def test_typed_aliases_preserved_and_oversized_late_single_preflights_enti
 @pytest.mark.asyncio
 async def test_request_bounds_split_with_complete_source_messages():
     original = await sections([value(i) for i in range(8)])
-    config = SummaryConfig(input_character_budget=5000)
+    # Include the versioned dictionary instructions while still forcing splits.
+    config = SummaryConfig(input_character_budget=5600)
     model = CompactModel("empty_fields")
     compact = await compact_summary_batch(original, model, config=config)
     assert len(model.payloads) > 1

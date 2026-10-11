@@ -1,4 +1,5 @@
 """Real SQLite/WAL privacy boundaries; all generation and embedding calls mocked."""
+from logchat.rag.compact_input import expand_compact_input
 from tests.physical_preflight import SyntheticPhysicalPreflight
 import asyncio
 from dataclasses import replace
@@ -118,7 +119,7 @@ async def test_runtime_passes_trusted_views_to_grouping_and_compact_with_canonic
     assert RAW in message and "LIB042" in message and "projection-" not in message
     compact = [call for call in model.calls if "records" in call]
     assert len(compact) == 1 and len(compact[0]["records"]) == 12
-    assert {row["message"] for row in compact[0]["records"]} == {message}
+    assert {row["message"] for row in expand_compact_input(compact[0])["records"]} == {message}
     assert {field["value"] for field in compact[0]["field_catalog"] if field["key"] == "event_id"} == {
         event.event_id for event in events}
     assert compact[0]["exact_metrics"]["event_count"] == 12

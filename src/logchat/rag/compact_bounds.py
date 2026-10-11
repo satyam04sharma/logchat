@@ -13,6 +13,9 @@ from logchat.rag.source_observations import (
 
 def compact_reservations(payload, records, config):
     from logchat.rag.source_catalog import SELECTOR_PROTOCOL
+    from logchat.rag.compact_input import expand_compact_input
+    if "input_projection" in payload:
+        payload = expand_compact_input(payload)
     protocol = payload.get('selector_protocol')
     if 'selector_protocol' in payload and protocol != SELECTOR_PROTOCOL:
         raise ValueError('unknown_compact_selector_protocol')

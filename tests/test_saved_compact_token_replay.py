@@ -1,4 +1,4 @@
-"""Optional private offline replay: saved overflow proof plus synthetic child fit.
+"""Optional private offline replay: historical overflow plus synthetic projected fit.
 
 No native child-token claims are made. Configure both paths to immutable local
 artifacts; no evidence files are written and no source data is printed.
@@ -16,7 +16,9 @@ import pytest
 from connectors.local import parse_push_events
 from logchat.rag.builder import prepare_preserved_batch, event_key
 from logchat.rag.contracts import SourceIdentity, TimeWindow
+from logchat.rag.compact_input import expand_compact_input
 from logchat.rag.sections import (
+    _COMPACT_INPUT_INSTRUCTION,
     CATALOG_COMPACT_INSTRUCTION, SummaryConfig, _pack_compact_physical,
     _grouping_messages, _matching_model_event, records_for_chunk, section_batch, validate_refinement,
 )
@@ -79,10 +81,12 @@ async def test_saved_oversized_request_splits_under_explicit_offline_child_contr
 
         async def preflight_generation(self, instruction, payload, schema):
             checked(self.calls == 3, 'compaction_before_plan')
-            if hashed(payload) == saved[3]['payload_sha256']:
-                checked(hashed(instruction) == saved[3]['instruction_sha256']
+            expanded = expand_compact_input(payload)
+            historical_instruction = instruction.removesuffix(_COMPACT_INPUT_INSTRUCTION)
+            if hashed(expanded) == saved[3]['payload_sha256']:
+                checked(hashed(historical_instruction) == saved[3]['instruction_sha256']
                         and hashed(schema) == saved[3]['schema_sha256'], 'saved_compact_request_mismatch')
-                spelling = instruction + SYSTEM_SAFETY_SUFFIX + model_json(payload) + model_json(schema)
+                spelling = historical_instruction + SYSTEM_SAFETY_SUFFIX + model_json(expanded) + model_json(schema)
                 checked(len(spelling) == len(spelling.encode()) == 18925, 'saved_spelling_mismatch')
                 checked((len(payload['records']), len(payload['field_catalog']), len(payload['phrase_catalog']))
                         == (28, 33, 92), 'saved_catalog_counts_mismatch')
@@ -90,6 +94,8 @@ async def test_saved_oversized_request_splits_under_explicit_offline_child_contr
                 checked(native['input_tokens'] == 7502 and native['output_reserve'] == 1200
                         and native['context_tokens'] == 8192 and not native['fits'], 'saved_native_proof_mismatch')
                 self.overflow_seen = True
+                # Historical tokens do not measure this projected request.
+                # Reject this parent only as an explicit synthetic split control.
                 return False
             # Mechanics-only oracle for all unmeasured children; never a token bound.
             return len(payload['records']) <= 14

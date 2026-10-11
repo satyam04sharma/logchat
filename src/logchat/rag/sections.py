@@ -16,6 +16,7 @@ import math
 import re
 
 from logchat.rag.contracts import MAX_COMPACT_EVIDENCE_CHARS, MAX_MODEL_SUMMARY_CHARS, MAX_SUMMARY_CHARS, ExactMetrics, PreparedBatch, SemanticChunk, utc
+from logchat.rag.compact_input import COMPACT_INPUT_VERSION
 from pipeline.models import ModelUnavailable
 from logchat.rag.source_observations import (
     EVIDENCE_VERSION as COMPACT_EVIDENCE_V3, RENDER_VERSION, render_observations, observation_embedding,
@@ -777,6 +778,19 @@ as a global union against canonical, producer and projection bodies before packi
 """ + COMPACT_INSTRUCTION[COMPACT_INSTRUCTION.index("Code derives complete ordered"):]
 
 
+# Both legacy phrase selectors and catalog selectors see the same reversible
+# representation. These exact instructions participate in full-request proofs.
+_COMPACT_INPUT_INSTRUCTION = f"""
+Input projection {COMPACT_INPUT_VERSION}: message_dictionary maps message_ref IDs
+to exact source messages. For each ordered records row, read its message_ref in
+message_dictionary as that record's message. A shared message does not merge
+records: retain each row's ref, timestamp, status and duration attribution.
+Field and phrase catalogs retain all choices and their original meanings.
+"""
+COMPACT_INSTRUCTION += _COMPACT_INPUT_INSTRUCTION
+CATALOG_COMPACT_INSTRUCTION += _COMPACT_INPUT_INSTRUCTION
+
+
 def _forbidden_field(key):
     return key.rsplit("/", 1)[-1].replace("~1", "/").replace("~0", "~").lower() in _RAW_FIELD_NAMES
 
@@ -1062,8 +1076,8 @@ def _correlation_field(key):
         ("_id", "_email", "_phone", "_phone_number", "_code"))
 
 
-def _compact_request(chunk, records, config, messages=None, *, source_catalog=None,
-                     protected_bodies=None):
+def _expanded_compact_request(chunk, records, config, messages=None, *, source_catalog=None,
+                              protected_bodies=None):
     metadata = [{"ref": "e" + str(index), **{name: record[name] for name in _COMPACT_METADATA}}
                 for index, record in enumerate(records)]
     catalogs = [_source_fields(record) for record in records]
@@ -1151,6 +1165,19 @@ def _compact_request(chunk, records, config, messages=None, *, source_catalog=No
             "items": {"type": "string", **({"enum": refs} if refs else {})}}
     elif protected_bodies is not None:
         raise SectionModelError("compact_catalog_invalid_binding", "compact_summary")
+    return payload, schema, metadata, catalogs
+
+
+def _compact_request(chunk, records, config, messages=None, **catalog_options):
+    """Build and prove the complete model input before any packing or counting."""
+    from logchat.rag.compact_input import project_compact_input, validate_compact_input_projection
+    original, schema, metadata, catalogs = _expanded_compact_request(
+        chunk, records, config, messages, **catalog_options)
+    try:
+        payload = project_compact_input(original)
+        validate_compact_input_projection(original, payload)
+    except (ValueError, TypeError, KeyError, RecursionError):
+        raise SectionModelError("compact_input_projection_invalid", "compact_summary") from None
     return payload, schema, metadata, catalogs
 
 

@@ -151,7 +151,7 @@ def test_ambiguous_originals_reject(mutate):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("catalog", [False, True])
 async def test_actual_complete_compact_request_conserves_every_choice(catalog):
-    from logchat.rag.sections import SummaryConfig, _compact_request, records_for_chunk
+    from logchat.rag.sections import SummaryConfig, _expanded_compact_request, records_for_chunk
     from tests.test_compact_message_projection import fixture, catalog_request_options, value
     from tests.test_grouping_projection import sidecar
 
@@ -159,7 +159,7 @@ async def test_actual_complete_compact_request_conserves_every_choice(catalog):
                                       rare_code="RARE-73") for i in range(4)])
     messages, options = catalog_request_options(batch, sidecar(events))
     for chunk in batch.chunks:
-        original, schema, metadata, fields = _compact_request(
+        original, schema, metadata, fields = _expanded_compact_request(
             chunk, records_for_chunk(chunk), SummaryConfig(), messages,
             **(options if catalog else {}))
         before = deepcopy((original, schema, metadata, fields))

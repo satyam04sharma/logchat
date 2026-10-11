@@ -1,4 +1,5 @@
 """Compact storage contracts; model responses here are explicit mock fixtures."""
+from logchat.rag.compact_input import expand_compact_input
 from tests.physical_preflight import SyntheticPhysicalPreflight
 from dataclasses import asdict, replace
 import json
@@ -17,10 +18,12 @@ class CompactModel(SyntheticPhysicalPreflight):
     chat_model = "mock-compact-model"
 
     def __init__(self, mode="valid"):
-        self.mode, self.calls, self.payloads = mode, 0, []
+        self.mode, self.calls, self.payloads, self.wire_payloads = mode, 0, [], []
 
     async def generate(self, instruction, payload, schema):
         self.calls += 1
+        self.wire_payloads.append(payload)
+        payload = expand_compact_input(payload)
         self.payloads.append(payload)
         fields = [field["field_ref"] for field in payload["field_catalog"]
                   if field["key"] in {"error_code", "/user/email", "quantity", "active", "nothing", "codes", "/path~1key/~0leaf"}]

@@ -176,9 +176,9 @@ async def test_mixed_status_section_keeps_each_message_measurement_binding(proje
     config = SummaryConfig()
     messages, options = catalog_request_options(original, candidates)
     expected, schema, _, _ = _compact_request(chunk, records, config, messages, **options)
-    assert payload == expected
+    assert model.wire_payloads[0] == expected
     _compact_feasible(chunk, records, config, messages, **options)
-    serialized = CATALOG_COMPACT_INSTRUCTION + SYSTEM_SAFETY_SUFFIX + model_json(payload) + model_json(schema)
+    serialized = CATALOG_COMPACT_INSTRUCTION + SYSTEM_SAFETY_SUFFIX + model_json(expected) + model_json(schema)
     assert len(serialized) <= config.input_character_budget
     assert len(serialized.encode()) <= config.input_byte_budget
     assert "complete ordered exact substring membership" in CATALOG_COMPACT_INSTRUCTION
@@ -223,7 +223,7 @@ async def test_separated_auth_runs_keep_timestamps_span_and_work_sum_distinct(pr
     digests = [content_digest(event) for event in events]
     compact = await compact_summary_batch(original, model, model_events=candidates)
     payload = next(payload for payload in model.payloads if payload["context"]["service"] == "auth")
-    assert payload == expected
+    assert next(p for p in model.wire_payloads if p["context"]["service"] == "auth") == expected
     assert payload["exact_metrics"]["duration_sum_ms"] == 1527
     assert payload["exact_metrics"]["status_counts"] == {"401": 30}
     assert payload["observed_window"]["span_ms"] == 53
@@ -242,7 +242,7 @@ async def test_separated_auth_runs_keep_timestamps_span_and_work_sum_distinct(pr
     assert "consecutive" not in _json(payload) and "adjacency" not in _json(payload)
     assert "not timestamp span, adjacency, cause or recovery" in CATALOG_COMPACT_INSTRUCTION
     assert "NOT elapsed wall-clock time" in payload["metric_semantics"]["duration_sum_ms"]
-    serialized = CATALOG_COMPACT_INSTRUCTION + SYSTEM_SAFETY_SUFFIX + model_json(payload) + model_json(schema)
+    serialized = CATALOG_COMPACT_INSTRUCTION + SYSTEM_SAFETY_SUFFIX + model_json(expected) + model_json(schema)
     assert len(serialized) <= config.input_character_budget
     assert len(serialized.encode()) <= config.input_byte_budget
     assert [content_digest(event) for event in events] == digests
