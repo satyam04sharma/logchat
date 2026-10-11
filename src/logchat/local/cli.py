@@ -7,7 +7,6 @@ import subprocess
 import sys
 import threading
 import signal
-from dataclasses import asdict
 import time
 import tomllib
 from uuid import uuid4
@@ -430,9 +429,9 @@ def run_command(ctx:typer.Context,project:Path=typer.Option(Path('.'),exists=Tru
                 if part.endswith(b'\n'):
                     text=buffer.decode('utf-8',errors='replace').rstrip('\r\n');buffer=b''
                     if text.strip():
-                        from connectors.local import parse_stdout_line
+                        from connectors.local import event_wire_fields, parse_stdout_line
                         try:
-                            value=asdict(parse_stdout_line(text,preserve_fields=preserve_capture))
+                            value=event_wire_fields(parse_stdout_line(text,preserve_fields=preserve_capture))
                             value['timestamp']=value.pop('ts').isoformat();value.pop('source',None)
                             if level=='error' and value['level']=='info':
                                 try:explicit=json.loads(text).get('level')

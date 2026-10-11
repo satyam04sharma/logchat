@@ -7,21 +7,144 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AsyncExitStack
 from dataclasses import asdict
 from datetime import timedelta
 import json
+import logging
 import os
 from pathlib import Path
 import threading
+import time
+import uuid
 
 from logchat.rag.contracts import EmbeddingSpec, SourceIdentity, TimeWindow
 from logchat.rag.scheduler import SQLiteSchedulerStore
 
 
 CONFIG_FILE = "rag.json"
+
+
+class _IntakeDiagnostics:
+    """Constant-size timing state, with no source identities or event content."""
+
+    def __init__(self):
+        self.identifier = uuid.uuid4().hex
+        self.started = self.stage_started = time.monotonic()
+        self.stage = "admission"
+        self.calls = {"chunking": 0, "summary": 0}
+        self.status = "failed"
+
+    def emit(self, kind, *, warning=False, **values):
+        try:
+            logging.getLogger(__name__).log(logging.WARNING if warning else logging.INFO,
+                "native_intake %s", json.dumps({"intake": self.identifier, "kind": kind,
+                    "stage": self.stage, **values}, sort_keys=True))
+        except Exception:
+            pass  # Optional telemetry must never replace the pipeline outcome.
+
+    def advance(self, stage):
+        now = time.monotonic()
+        self.emit("stage_completed", seconds=round(now - self.stage_started, 6))
+        self.stage, self.stage_started = stage, now
+
+    def finish(self):
+        now = time.monotonic()
+        self.emit("finished", warning=self.status != "ok", status=self.status,
+            seconds=round(now - self.started, 6), stage_seconds=round(now - self.stage_started, 6),
+            calls=self.calls)
+
+
+class _TimedIntakeModel:
+    """Delegate unchanged requests to the configured shared generation model."""
+
+    def __init__(self, model, diagnostics, role):
+        self.model, self.diagnostics, self.role = model, diagnostics, role
+
+    def __getattr__(self, name):
+        return getattr(self.model, name)
+
+    async def generate(self, instruction, payload, schema):
+        diagnostics = self.diagnostics
+        diagnostics.calls[self.role] += 1
+        call = diagnostics.calls[self.role]
+        started = time.monotonic()
+        diagnostics.emit("model_started", role=self.role, call=call)
+        status = "failed"
+        try:
+            result = await self.model.generate(instruction, payload, schema)
+            status = "ok"
+            return result
+        except asyncio.CancelledError:
+            status = "cancelled"
+            raise
+        finally:
+            diagnostics.emit("model_finished", warning=status != "ok", role=self.role,
+                call=call, status=status, seconds=round(time.monotonic() - started, 6))
+
+
+class _SilentIntakeDiagnostics:
+    """Continue unchanged model work when timing initialization is unavailable."""
+
+    def __init__(self):
+        self.calls = {"chunking": 0, "summary": 0}
+        self.status = "failed"
+
+    def emit(self, *args, **kwargs):
+        pass
+
+    def advance(self, stage):
+        pass
+
+    def finish(self):
+        pass
+
+
+class _FairIntakeSlot:
+    """Nonblocking retry turns; store only bounded source keys, never events.
+
+    Retrying sources keep their FIFO position. Abandoned turns expire so a
+    disconnected producer cannot indefinitely prevent intake or settings edits.
+    Anonymous users (settings and capture drain) share exclusion and cannot
+    jump ahead of live source retries.
+    """
+
+    def __init__(self, *, max_waiters=256, retry_seconds=10, clock=time.monotonic):
+        self._lock = threading.Lock()
+        self._held = False
+        self._waiting = {}
+        self._max_waiters = max_waiters
+        self._retry_seconds = retry_seconds
+        self._clock = clock
+
+    def acquire(self, blocking=False, *, scope=None):
+        if blocking:
+            raise ValueError("intake_slot_requires_nonblocking_retry")
+        with self._lock:
+            now = self._clock()
+            self._waiting = {key: stamp for key, stamp in self._waiting.items()
+                             if now - stamp < self._retry_seconds}
+            if scope is not None:
+                if scope not in self._waiting and len(self._waiting) >= self._max_waiters:
+                    return False
+                self._waiting[scope] = now
+            if self._held or (self._waiting and next(iter(self._waiting)) != scope):
+                return False
+            if scope is not None:
+                del self._waiting[scope]
+            self._held = True
+            return True
+
+    def release(self):
+        with self._lock:
+            if not self._held:
+                raise ValueError("intake_slot_released_without_reservation")
+            self._held = False
+
+
 # One in-memory original-event intake at a time across sync/async entrypoints.
 # Busy callers retry; the executor never accumulates an unbounded raw work queue.
-_INTAKE_SLOT = threading.BoundedSemaphore(1)
+_INTAKE_SLOT = _FairIntakeSlot()
 # Short raw admission must keep working while the model consumes another batch.
 _CAPTURE_SLOT = threading.BoundedSemaphore(1)
 _INTAKE_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="logchat-intake")
@@ -179,6 +302,12 @@ class NativeRAGRuntime:
             raise ValueError("Source is not part of this project.")
         return SourceIdentity("local-os-user", project_id, source["environment_id"], source_id)
 
+    def _reserve_intake(self, project_id, source_id):
+        identity = self.identity(project_id, source_id)
+        # Different local stores may use the same source IDs in one process.
+        scope = (str(self.store.state_dir.resolve()), identity)
+        return _INTAKE_SLOT.acquire(blocking=False, scope=scope)
+
     def ingest(self, project_id: str, source_id: str, events) -> dict:
         """Synchronous adapters use a bounded bridge; async adapters should await ingest_async."""
         from .raw_capture import load_capture_policy
@@ -190,7 +319,7 @@ class NativeRAGRuntime:
             raise ModelUnavailable("model_not_configured")
         if not self.preserve_content:
             return self._ingest_redacted(project_id, source_id, events)
-        if not _INTAKE_SLOT.acquire(blocking=False):
+        if not self._reserve_intake(project_id, source_id):
             raise ModelUnavailable("intake_busy_retry_required")
         try:
             asyncio.get_running_loop()
@@ -215,13 +344,18 @@ class NativeRAGRuntime:
             raise ModelUnavailable("model_not_configured")
         if not self.preserve_content:
             return self._ingest_redacted(project_id, source_id, events)
-        if not _INTAKE_SLOT.acquire(blocking=False):
+        if not self._reserve_intake(project_id, source_id):
             raise ModelUnavailable("intake_busy_retry_required")
         return await self._ingest_reserved(project_id, source_id, events)
 
     async def _ingest_reserved(self, project_id, source_id, events):
         from pipeline.models import ModelUnavailable
+        diagnostics = None
         try:
+            try:
+                diagnostics = _IntakeDiagnostics()
+            except Exception:
+                diagnostics = _SilentIntakeDiagnostics()
             from logchat.rag.builder import event_key, prepare_preserved_batch
             from logchat.rag.sections import section_batch, compact_summary_batch, validate_compact_batch
             if len(events) > MAX_INTAKE_EVENTS:
@@ -251,7 +385,11 @@ class NativeRAGRuntime:
                              if state != "completed")
             if pending and unfinished >= 64:
                 raise ModelUnavailable("intake_backpressure_retry_required")
-            async with asyncio.timeout(300):
+            diagnostics.emit("admitted", events=len(events), pending=len(pending))
+            async with asyncio.timeout(300) as intake_timeout, AsyncExitStack() as token_owners:
+                session = getattr(self.model_profile.generation("summary"), "generation_token_session", None)
+                if callable(session):
+                    await token_owners.enter_async_context(session(deadline=intake_timeout.when()))
                 for offset in range(0, len(pending), 400):
                     if unfinished + len(jobs) >= 64:
                         raise ModelUnavailable("intake_backpressure_retry_required")
@@ -259,16 +397,31 @@ class NativeRAGRuntime:
                     window = TimeWindow(min(e.ts for e in group), max(e.ts for e in group) + timedelta(microseconds=1))
                     # Originals exist only in this bounded call's memory. Nothing
                     # enters SQLite before both local generation stages finish.
+                    diagnostics.advance("prepare")
                     transient = prepare_preserved_batch(identity, group, window)
-                    sectioned = await section_batch(transient, self.model_profile.generation("chunking"))
-                    compact = await compact_summary_batch(sectioned, self.model_profile.generation("summary"))
+                    model_events = {event_key(identity, event.event_id): event for event in group}
+                    diagnostics.advance("grouping")
+                    sectioned = await section_batch(transient, _TimedIntakeModel(
+                        self.model_profile.generation("chunking"), diagnostics, "chunking"),
+                        model_events=model_events)
+                    diagnostics.emit("sectioned", sections=len(sectioned.chunks))
+                    diagnostics.advance("compact")
+                    compact = await compact_summary_batch(sectioned, _TimedIntakeModel(
+                        self.model_profile.generation("summary"), diagnostics, "summary"),
+                        model_events=model_events, deadline=intake_timeout.when())
+                    diagnostics.advance("validate_enqueue")
                     validate_compact_batch(compact)
+                    plan = await self.model_profile.plan_embedding_batch(
+                        compact, deadline=intake_timeout.when())
+                    compact = plan.batch
                     jobs.append(self.scheduler.enqueue(compact,
                         event_digests={key: digests[key] for key in compact.event_keys}))
+            diagnostics.status = "ok"
             return {"accepted": len(events), "deduplicated": len(events) - len(pending), "jobs": jobs,
                     "state": "durably_prepared", "retrieval": "semantic_hybrid", "indexed": False,
                     "original_events_stored": False}
         except asyncio.CancelledError:
+            diagnostics.status = "cancelled"
             raise
         except Exception as error:
             category = str(error) if str(error) in {
@@ -286,6 +439,11 @@ class NativeRAGRuntime:
             raise unavailable from None
         finally:
             _INTAKE_SLOT.release()
+            if diagnostics is not None:
+                try:
+                    diagnostics.finish()
+                except Exception:
+                    pass
 
     def _ingest_redacted(self, project_id: str, source_id: str, events) -> dict:
         from logchat.rag.builder import prepare_batch
@@ -367,6 +525,10 @@ class NativeRAGRuntime:
                                 failure_category = "legacy_raw_work_requires_explicit_migration"
                                 raise ValueError(failure_category)
                             validate_compact_batch(job.batch)
+                            recovered = self.scheduler.recover_projection(job)
+                            if recovered is None:
+                                continue
+                            job = recovered
                         failure_category = "embedding_unavailable"
                         built = await embed_batch(job.batch, self.provider)
                         self.scheduler.complete(job, built, writer=self.backend.write_result)
@@ -374,13 +536,15 @@ class NativeRAGRuntime:
                         raise
                     except Exception as error:
                         category = getattr(error,"category",None)
-                        if category in {"section_timeout","section_provider_unavailable","section_invalid_partition",
+                        if category in {"embedding_input_context_exceeded",
+                                        "section_timeout","section_provider_unavailable","section_invalid_partition",
                                         "section_invalid_model_output","section_output_budget_exceeded",
                                         "summary_timeout","summary_provider_unavailable","summary_invalid_model_output","summary_invalid_output","summary_input_budget_exceeded",
                                         "summary_local_model_required","summary_model_identity_required",
                                         "summary_output_budget_exceeded","summary_ungrounded_observation"}:
                             failure_category = category
-                        self.scheduler.fail(job, failure_category)
+                        self.scheduler.fail(job, failure_category,
+                                            retryable=failure_category != "embedding_input_context_exceeded")
                         self.provider = None
                         self.state, self.error = "unavailable", failure_category
                     finally:

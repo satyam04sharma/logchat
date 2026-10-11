@@ -1,5 +1,14 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizationOrigin:
+    """Internal pending-input provenance; never canonical replay evidence."""
+
+    version: int
+    prefix_chars: int
+    binding: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,3 +23,4 @@ class LogEvent:
     release: str | None = None
     duration_ms: float | None = None
     request_status: int | None = None
+    normalization_origin: NormalizationOrigin | None = field(default=None, compare=False, repr=False)

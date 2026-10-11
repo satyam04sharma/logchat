@@ -290,13 +290,32 @@ class LocalStore:
         with self.connection() as connection:
             self.project(connection, project_id)
             rows = connection.execute("""
-                    SELECT s.id,s.name,e.name AS environment,s.port,s.kind,s.created_at,
+                    SELECT s.id,s.name,s.environment_id,e.name AS environment,s.port,s.kind,s.created_at,
                   (SELECT count(*) FROM summaries c WHERE c.source_id=s.id) AS chunk_count,
                   (SELECT cursor FROM collection_cursors c WHERE c.source_id=s.id) AS collection_cursor
                 FROM sources s JOIN environments e ON e.id=s.environment_id
                 WHERE s.project_id=? ORDER BY s.created_at,s.name
             """, (project_id,)).fetchall()
-            result = [dict(row) for row in rows]
+            environments = {row["id"]: row["environment_id"] for row in rows}
+            result = [{key: row[key] for key in row.keys() if key != "environment_id"} for row in rows]
+            if self.rag_runtime is not None:
+                # Capture/queued jobs are not searchable memory. Count published
+                # native chunks directly, without calling runtime.status(), which
+                # itself uses list_sources(). Keep old lexical history separate.
+                counts = {}
+                backend = self.rag_runtime.backend
+                if backend is not None:
+                    native = backend.connect()
+                    try:
+                        counts = {(row["source_id"], row["environment_id"]): row["chunks"]
+                            for row in native.execute("""SELECT source_id,environment_id,count(*) AS chunks
+                                FROM rag_chunks WHERE owner_id=? AND project_id=?
+                                GROUP BY source_id,environment_id""", ("local-os-user", project_id))}
+                    finally:
+                        native.close()
+                for row in result:
+                    row["legacy_chunk_count"] = row["chunk_count"]
+                    row["chunk_count"] = counts.get((row["id"], environments[row["id"]]), 0)
             try:
                 report = json.loads((self.state_dir/'railway-status.json').read_text())
                 statuses = {item['source_id']: item['status'] for item in report.get('sources', []) if 'source_id' in item}

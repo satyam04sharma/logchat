@@ -1,3 +1,6 @@
+from tests.catalog_selector import select_topics
+from logchat.rag.compact_input import expand_compact_input
+from tests.physical_preflight import SyntheticPhysicalPreflight
 import asyncio,json
 from datetime import datetime,timedelta,timezone
 import pytest
@@ -7,13 +10,16 @@ from logchat.local.rag_runtime import configure
 from logchat.local.store import LocalStore
 from logchat.rag.contracts import EmbeddingSpec
 from logchat.rag.embeddings import OllamaEmbeddingProvider
-from logchat.rag.sections import records_for_chunk
+from logchat.rag.sections import records_for_chunk, validate_compact_chunk
 from pipeline.types import LogEvent
 
 
 @pytest.mark.asyncio
 async def test_preserved_intake_refinement_embedding_query_inspection_and_chat(tmp_path,monkeypatch):
+    from tests.synthetic_embedding_admission import install
+    install(monkeypatch)
     texts=[]
+    classifier_inputs=[]
     class Provider:
         spec=EmbeddingSpec('ollama','mock','digest:prefix-v1',8)
         preserve_content=True;local_only=True
@@ -21,17 +27,20 @@ async def test_preserved_intake_refinement_embedding_query_inspection_and_chat(t
             texts.extend(values);return [(1,.1,.2,.3,.4,.5,.6,.7) for _ in values]
     async def create(**kwargs):return Provider()
     monkeypatch.setattr(OllamaEmbeddingProvider,'create',create)
-    class LocalModel:
+    class LocalModel(SyntheticPhysicalPreflight):
         preserve_content=True;local_only=True;chat_model='mock-local'
         def __init__(self,**kwargs):pass
         async def generate(self,instruction,context,schema):
             if 'records' in context:
-                return {'summary':'A session renewal failed for the affected visitor.',
-                    'important_fields':[field['field_ref'] for field in context['field_catalog'] if field['key'] in {'email','phone','error_code'}],
-                    'uncertainties':[]}
+                context = expand_compact_input(context)
+                assert set(schema['properties']) == {'selections', 'important_fields'}
+                return {**select_topics(context, ['Session failure']),
+                    'important_fields':[field['field_ref'] for field in context['field_catalog'] if field['key'] in {'email','phone','error_code'}]}
             if 'items' in context:return {'sections':[[item['ref'] for item in context['items']]]}
-            return {'selections':[{'evidence_ref':item['evidence_ref'],'reason':'exact_identifier','confidence':1}
-                for cell in context['cells'] for item in cell['candidates']]}
+            assert context['protocol']=='independent-candidate-relevance-v1'
+            assert 'candidate_ref' in context['candidate']
+            classifier_inputs.append(context['candidate'])
+            return {'label':'exact_identifier','confidence':1}
     monkeypatch.setattr('pipeline.models.LocalModels',LocalModel)
     await configure(tmp_path,model='mock',dimensions=8,content_policy='local_model_compact',chat_model='mock-local')
     store=LocalStore(tmp_path);project=store.create_project('preserved')
@@ -49,6 +58,14 @@ async def test_preserved_intake_refinement_embedding_query_inspection_and_chat(t
     chunk=runtime.backend.list_chunks(owner_id='local-os-user',project_id=project['id'])[0]
     assert chunk.compression_version=='local-model-compact-v1'
     assert chunk.summary_model=='mock-local'
+    compact=validate_compact_chunk(chunk)
+    assert compact['version']=='compact-evidence-v3'
+    observations=compact['source_observations']
+    assert len(observations)==1
+    assert observations[0]['text']=='Session failure'
+    assert observations[0]['event_refs']==['e0']
+    assert observations[0]['exact_metrics']['status_counts']=={'401':1}
+    assert observations[0]['exact_metrics']['duration_sum_ms']==18
     assert 'message' not in records_for_chunk(chunk)[0]
     assert chunk.supporting_records is None
     assert 'synthetic_raw_only_marker' not in chunk.compact_evidence
@@ -60,6 +77,8 @@ async def test_preserved_intake_refinement_embedding_query_inspection_and_chat(t
     assert 'records' not in inspected['memory']
     assert inspected['memory']['original_records_retained'] is False
     assert inspected['memory']['important_fields']
+    assert inspected['memory']['source_observations']==observations
+    assert 'uncertainties' not in inspected['memory']
     status=client.get(f"/projects/{project['id']}/status",headers=headers).json()
     assert status['memory']['application']['full_event_text_stored'] is False
     assert status['models']['chat_model']=='mock-local'
@@ -77,6 +96,12 @@ async def test_preserved_intake_refinement_embedding_query_inspection_and_chat(t
     assert result['user_message']['content']=='What happened to alice@example.test with LIB-042?'
     assert result['result']['evidence'][0]['retained_events'][0]['important_fields']
     assert result['result']['evidence'][0]['original_records_retained'] is False
+    assert classifier_inputs and all(row['source_observations']==observations for row in classifier_inputs)
+    assert result['result']['evidence'][0]['source_observations']==observations
+    assert result['result']['candidate_evidence'][0]['source_observations']==observations
+    assert result['result']['agent_context']['evidence'][0]['source_observations']==observations
+    assert '1 retained events contain source phrase "Session failure" (source quote)' in result['result']['answer']
+    assert 'synthetic_raw_only_marker' not in json.dumps(result)
 
     assert result['result']['output_kind']=='retrieved_context'
     assert result['result']['solution_generated'] is False

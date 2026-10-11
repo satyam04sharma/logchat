@@ -145,26 +145,37 @@ def walkthrough(root, client):
                 save('console-status.json', snapshot)
                 raise AssertionError('console_not_indexed')
             check('C20', 'Second app indexed through shared semantic pipeline', wait_indexed)
-            save('auth-status.json', status(auth))
+            save('auth-status-before-context.json', status(auth))
 
             for environment in ['dev', 'preview', 'prod']:
                 def scoped(env=environment):
+                    env_id = next(e['id'] for e in request('GET', f"/projects/{auth['id']}/environments") if e['name'] == env)
+                    sources = request('GET', f"/projects/{auth['id']}/sources")
+                    source_id = next(s['id'] for s in sources if s['name'] == 'auth ' + env)
+                    rows = [json.loads(line) for line in (root / f'projects/auth app/{env}.ndjson').read_text().splitlines()]
+                    # File capture competes with the browser intakes. Console
+                    # readiness does not imply every auth source has indexed.
+                    deadline = time.monotonic() + 180
+                    while time.monotonic() < deadline:
+                        browse = request('GET', f"/projects/{auth['id']}/search?environment_id={env_id}")
+                        assert not browse['limit_reached']
+                        indexed = [item for item in browse['evidence'] if item['identity']['source_id'] == source_id]
+                        assert all(item['identity']['project_id'] == auth['id'] and item['identity']['environment_id'] == env_id for item in indexed)
+                        indexed_count = sum(item['metrics']['event_count'] for item in indexed)
+                        save(f'auth-{env}-index-readiness.json', dict(expected_events=len(rows),indexed_events=indexed_count,source_id=source_id))
+                        if indexed_count == len(rows):
+                            break
+                        assert indexed_count < len(rows), 'unexpected_indexed_events'
+                        page.wait_for_timeout(1000)
+                    else:
+                        raise AssertionError('auth_source_not_indexed_within_budget')
                     result = query(auth, env, 'What context exists about refused session renewal?', f'auth-{env}-context.json')
                     selected = result.get('evidence', [])
                     assert selected, 'no_selected_evidence'
                     text = json.dumps(selected)
                     assert all(other.upper() + '-' not in text for other in ['dev', 'preview', 'prod'] if other != env)
-                    env_id = next(e['id'] for e in request('GET', f"/projects/{auth['id']}/environments") if e['name'] == env)
-                    sources = request('GET', f"/projects/{auth['id']}/sources")
-                    source_id = next(s['id'] for s in sources if s['name'] == 'auth ' + env)
                     assert all(item['project_id'] == auth['id'] and item['environment_id'] == env_id
                                and item['source_id'] == source_id for item in selected)
-                    rows = [json.loads(line) for line in (root / f'projects/auth app/{env}.ndjson').read_text().splitlines()]
-                    browse = request('GET', f"/projects/{auth['id']}/search?environment_id={env_id}")
-                    assert not browse['limit_reached']
-                    indexed = [item for item in browse['evidence'] if item['identity']['source_id'] == source_id]
-                    assert all(item['identity']['project_id'] == auth['id'] and item['identity']['environment_id'] == env_id for item in indexed)
-                    indexed_count = sum(item['metrics']['event_count'] for item in indexed)
                     assert indexed_count == len(rows)
                     assert sum(item['event_count'] for item in selected) == len(rows)
                     assert sum(item['duration_sum_ms'] for item in selected) == sum(row['duration_ms'] for row in rows)
@@ -174,6 +185,7 @@ def walkthrough(root, client):
                          'selected_events': sum(item['event_count'] for item in selected),
                          'selected_duration_sum_ms': sum(item['duration_sum_ms'] for item in selected)})
                 check('C21', f'Real auth {environment} query with colliding error terms and scoped evidence', scoped)
+            save('auth-status.json', status(auth))
 
             def selected_console():
                 result = query(console, 'dev', 'GlyphIndexMismatch', 'console-exact-context.json')

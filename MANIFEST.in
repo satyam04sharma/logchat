@@ -1,0 +1,2 @@
+include tests/native/llama_vocab_stub.c
+include tests/native/runtime_vocab_stub.c

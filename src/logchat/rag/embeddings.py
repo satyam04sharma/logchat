@@ -13,7 +13,17 @@ from pipeline.redaction import redact_text
 
 MAX_TEXTS = 16
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_ERROR_BYTES = 1024
 PREFIX_VERSION = "prefix-v1"
+
+
+class EmbeddingContextExceeded(ModelUnavailable):
+    """Fixed content-free category; provider bodies never escape this boundary."""
+
+    category = "embedding_input_context_exceeded"
+
+    def __init__(self):
+        super().__init__(self.category)
 
 
 class OllamaEmbeddingProvider:
@@ -52,7 +62,8 @@ class OllamaEmbeddingProvider:
         value.spec = EmbeddingSpec("ollama", model, digest + ":" + PREFIX_VERSION, dimensions)
         return value
 
-    async def embed(self, texts, *, purpose="document"):
+    def request_body(self, texts, *, purpose="document"):
+        """Pure final-input recipe shared by physical admission and transport."""
         if purpose not in {"document", "query"} or not 1 <= len(texts) <= MAX_TEXTS:
             raise ValueError("embedding_batch_bound_exceeded")
         maximum = MAX_SUMMARY_CHARS if self.preserve_content else 4000
@@ -60,13 +71,25 @@ class OllamaEmbeddingProvider:
             raise ValueError("embedding_text_bound_exceeded")
         prefix = ("search_document: " if purpose == "document" else "search_query: ") if self.spec.model.split(":")[0] == "nomic-embed-text" else ""
         payload = [prefix + (text if self.preserve_content else redact_text(text)) for text in texts]
+        return {"model": self.spec.model, "input": payload, "truncate": False}
+
+    async def embed(self, texts, *, purpose="document"):
+        body = self.request_body(texts, purpose=purpose)
+        # Freeze all request-defining configuration across awaited revision
+        # checks. _request constructs the URL/body before yielding to transport.
+        binding = (self.base_url, self.transport, self.spec, self.preserve_content)
+        def check():
+            if ((self.base_url, self.transport, self.spec, self.preserve_content) != binding
+                    or self.transport is not binding[1]):
+                raise ValueError("embedding_provider_changed")
         try:
             async with httpx.AsyncClient(trust_env=False, follow_redirects=False, transport=self.transport, timeout=120) as client:
                 await self._verify_revision(client)
-                data = await self._request(client, "POST", "/api/embed", payload={
-                    "model": self.spec.model, "input": payload, "truncate": False,
-                })
+                check()
+                data = await self._request(client, "POST", "/api/embed", payload=body)
+                check()
                 await self._verify_revision(client)
+                check()
             vectors = data["embeddings"]
             if len(vectors) != len(texts):
                 raise ValueError()
@@ -75,6 +98,8 @@ class OllamaEmbeddingProvider:
                         or not any(x != 0 for x in vector)):
                     raise ValueError()
             return tuple(tuple(float(x) for x in vector) for vector in vectors)
+        except EmbeddingContextExceeded:
+            raise EmbeddingContextExceeded() from None
         except Exception:
             raise ModelUnavailable("embedding_unavailable_or_invalid_response") from None
 
@@ -86,10 +111,18 @@ class OllamaEmbeddingProvider:
 
     async def _request(self, client, method, endpoint, *, payload=None):
         async with client.stream(method, self.base_url + endpoint, json=payload) as response:
-            response.raise_for_status()
             content = bytearray()
+            maximum = MAX_RESPONSE_BYTES if response.is_success else MAX_ERROR_BYTES
             async for part in response.aiter_bytes():
-                if len(content) + len(part) > MAX_RESPONSE_BYTES:
+                if len(content) + len(part) > maximum:
                     raise ValueError("embedding_response_bound_exceeded")
                 content.extend(part)
+            if response.status_code == 400 and method == "POST" and endpoint == "/api/embed":
+                data = json.loads(content)
+                if isinstance(data, dict) and data.get("error") in (
+                    "input length exceeds maximum context length",
+                    "the input length exceeds the context length",
+                ):
+                    raise EmbeddingContextExceeded() from None
+            response.raise_for_status()
         return json.loads(content)

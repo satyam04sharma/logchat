@@ -4,7 +4,9 @@ Compact, searchable log memory for coding agents. Connect application logs to on
 
 ## Get started
 
-Python 3.12+ and a running local Ollama server are required. Logchat connects to your models; it does not bundle or download them.
+Python 3.12+ and SQLite loadable-extension support are required. The preserved native pipeline currently supports the reviewed **macOS Ollama `0.34.4` bundle**, `mistral:7b` and `nomic-embed-text:latest`, with exact approved model and library bytes. It also requires `/usr/bin/cc` and support for executing an Intel worker, including Rosetta on Apple silicon. See the [native compatibility contract](docs/native-token-counter-compatibility.md) before installation; other platforms, builds and model revisions are not validated by this path.
+
+Native generation uses completion without stored message history. Complete requests receive exact token checks; oversized v3 embedding chunks are subdivided by source records before enqueue. Logchat connects to your installed models; it does not bundle or download them.
 
 ```sh
 git clone https://github.com/satyam04sharma/logchat.git
@@ -18,8 +20,8 @@ python -m pip install .
 
 ```text
 Set up Logchat for this project. Read SKILL.md first.
-Inspect my local Ollama endpoint and available models. Help me choose a
-compatible generation model and embedding model; don't assume or download one.
+Check the native compatibility contract, local Ollama endpoint and available
+models. Use my explicitly selected supported profile; don't download weights.
 Configure Logchat, connect my app's command or log file, and give me the
 project-bound MCP configuration. Verify capture and retrieve supporting context.
 ```

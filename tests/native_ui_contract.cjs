@@ -52,7 +52,7 @@ const sandbox = { document, location: { hash: '' }, window: { matchMedia: query 
   }
   return mediaQueries.get(query);
 }, addEventListener() {} }, navigator: { clipboard: { writeText: async text => { clipboard = text; } } }, crypto: {}, Intl, Date, setTimeout: () => {}, clearInterval() {}, setInterval() {} };
-const source = fs.readFileSync('src/logchat/local/static/app.js', 'utf8').replace('  init();\n})();', '  globalThis.testUI = { state, viewLabels, messageNode, renderInvestigations, openMemories, closeEvidence, bindChrome, shellQuote, integrationSettings, commandPanel };\n})();');
+const source = fs.readFileSync('src/logchat/local/static/app.js', 'utf8').replace('  init();\n})();', '  globalThis.testUI = { renderComparisonResult, state, viewLabels, messageNode, renderInvestigations, openMemories, closeEvidence, bindChrome, shellQuote, integrationSettings, commandPanel };\n})();');
 vm.runInNewContext(source, sandbox);
 const ui = sandbox.testUI;
 function find(node, tag, text) { return node.querySelectorAll(tag).find(n => n.textContent === text); }
@@ -113,6 +113,35 @@ function find(node, tag, text) { return node.querySelectorAll(tag).find(n => n.t
   assert.equal(JSON.parse(clipboard).computed_provider_role.provider, 'extractive');
   assert.equal(JSON.parse(clipboard).cited_evidence_ids[0], 'm0');
   assert.equal(JSON.parse(clipboard).evidence.length, 20);
+  // One immutable citation has different facts in two actual query cells.
+  const scopedResult = { ...result, answer: 'Scoped evidence [canonical]',
+    plan: { project_id: 'project-bound', cells: [
+      { id: 'earlier', environment: 'prod', window: { label: 'earlier' }, evidence_ids: ['canonical'] },
+      { id: 'later', environment: 'prod', window: { label: 'later' }, evidence_ids: ['canonical'] },
+    ] }, evidence: ['earlier', 'later'].map((cell, index) => ({
+      id: 'canonical', chunk_id: 'canonical', original_chunk_id: 'canonical', cell_id: cell, cell_ids: [cell],
+      summary: `${cell} scoped phrase`, event_count: index + 1, facts_scope: 'retained_events_in_query_cell',
+      query_window: { start: `${cell}-start`, end: `${cell}-end`, bounds: '[start,end)' },
+      source_observations: [{ text: `${cell} scoped phrase`, event_refs: [`e${index}`] }],
+      token: 'must-not-copy',
+    })) };
+  const scopedAnswer = ui.messageNode({ result: scopedResult });
+  await find(scopedAnswer, 'button', 'Copy answer').listeners.click();
+  const scopedCopy = JSON.parse(clipboard);
+  assert.deepEqual(scopedCopy.evidence.map(row => [row.id, row.cell_id, row.event_count]),
+    [['canonical', 'earlier', 1], ['canonical', 'later', 2]]);
+  assert.deepEqual(scopedCopy.evidence[1].query_window, scopedResult.evidence[1].query_window);
+  assert.deepEqual(scopedCopy.evidence[1].source_observations, scopedResult.evidence[1].source_observations);
+  assert.ok(!clipboard.includes('must-not-copy'));
+  const comparison = new Node('div');
+  ui.renderComparisonResult(comparison, scopedResult);
+  const columns = comparison.querySelectorAll('.comparison-column');
+  assert.equal(columns.length, 2);
+  assert.ok(columns[0].textContent.includes('earlier scoped phrase'));
+  assert.ok(!columns[0].textContent.includes('later scoped phrase'));
+  assert.ok(columns[1].textContent.includes('later scoped phrase'));
+  assert.ok(!columns[1].textContent.includes('earlier scoped phrase'));
+  assert.ok(comparison.querySelector('.verdict').textContent.includes('[E1, E2]'));
   const emptyAnswer = ui.messageNode({ result: { answer: 'No matching evidence; behavior unknown', findings: [], evidence: [], gaps: ['Missing coverage'], provenance: { provider: 'extractive', model: 'deterministic_aggregate', status: 'extractive', reason: 'empty_evidence' } } });
   assert.ok(emptyAnswer.textContent.includes('behavior unknown'));
   assert.ok(emptyAnswer.textContent.includes('Missing coverage'));

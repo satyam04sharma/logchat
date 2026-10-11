@@ -7,7 +7,7 @@ this is not a forensic-erasure promise for filesystem snapshots or backups.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 import hashlib
 import json
@@ -19,9 +19,10 @@ import tempfile
 import time
 from uuid import uuid4
 
+from connectors.local import event_wire_fields, validated_normalization_origin
 from logchat.rag.builder import event_key
 from logchat.rag.contracts import SourceIdentity, utc
-from pipeline.types import LogEvent
+from pipeline.types import LogEvent, NormalizationOrigin
 
 DEFAULT_MAX_BYTES = 100 * 1024 * 1024
 DEFAULT_RETENTION_SECONDS = 24 * 60 * 60
@@ -34,6 +35,8 @@ SAFE_PROCESSING_FAILURES = frozenset({
     "section_output_budget_exceeded", "section_model_input_budget_exceeded", "section_model_identity_required",
     "local_preserving_section_model_required", "compact_timeout", "compact_provider_unavailable",
     "compact_invalid_output", "compact_field_mismatch", "compact_output_budget_exceeded",
+    "compact_token_capability_unavailable", "compact_token_preflight_unavailable",
+    "compact_token_singleton_exceeded", "compact_token_plan_exceeded",
     "compact_input_budget_exceeded", "intake_backpressure_retry_required", "event_identity_content_conflict",
     "legacy_replay_digest_unavailable", "compact_intake_unavailable_retry_required",
     "intake_busy_retry_required", "intake_bridge_unavailable", "model_not_configured",
@@ -124,7 +127,10 @@ def _encoded_event(event):
         raise ValueError("capture_invalid_event")
     if event.request_status is not None and (type(event.request_status) is not int or not 100 <= event.request_status <= 599):
         raise ValueError("capture_invalid_event")
-    value = asdict(event)
+    value = event_wire_fields(event)
+    origin = validated_normalization_origin(event)
+    if origin is not None:
+        value["normalization_origin"] = asdict(origin)
     value["ts"] = utc(event.ts).isoformat()
     return _json(value)
 
@@ -162,6 +168,12 @@ class CaptureSpool:
                     attempts INTEGER NOT NULL DEFAULT 0, last_failure TEXT, complete INTEGER NOT NULL DEFAULT 0);
                 CREATE INDEX IF NOT EXISTS raw_ready ON raw_events(complete,available_at,captured_at);
                 CREATE INDEX IF NOT EXISTS raw_project ON raw_events(project_id);
+                CREATE INDEX IF NOT EXISTS raw_scope ON raw_events(
+                    owner_id,project_id,environment_id,source_id,complete,lease_until);
+                CREATE TABLE IF NOT EXISTS raw_claim_cursor(
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                    owner_id TEXT NOT NULL, project_id TEXT NOT NULL,
+                    environment_id TEXT NOT NULL, source_id TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS raw_counts(
                     project_id TEXT PRIMARY KEY, accepted_events INTEGER NOT NULL DEFAULT 0,
                     completed_events INTEGER NOT NULL DEFAULT 0, expired_events INTEGER NOT NULL DEFAULT 0,
@@ -282,8 +294,21 @@ class CaptureSpool:
         now = time.time() if now is None else now
         with self._connection() as connection:
             self._expire(connection, now, load_capture_policy(self.state_dir))
-            first = connection.execute("""SELECT * FROM raw_events WHERE complete=0 AND available_at<=?
-                AND (lease_until IS NULL OR lease_until<=?) ORDER BY captured_at,event_key LIMIT 1""", (now, now)).fetchone()
+            # One durable cursor, not a queue of waiting originals or an
+            # ever-growing per-source history. Ready scopes take cyclic turns;
+            # retry-delayed and actively leased scopes do not block others.
+            cursor = connection.execute("""SELECT owner_id,project_id,environment_id,source_id
+                FROM raw_claim_cursor WHERE singleton=1""").fetchone()
+            previous = tuple(cursor) if cursor is not None else ("", "", "", "")
+            first = connection.execute("""SELECT DISTINCT e.owner_id,e.project_id,e.environment_id,e.source_id
+                FROM raw_events e WHERE e.complete=0 AND e.available_at<=?
+                AND (e.lease_until IS NULL OR e.lease_until<=?)
+                AND NOT EXISTS(SELECT 1 FROM raw_events active WHERE active.complete=0
+                    AND active.lease_until>? AND active.owner_id=e.owner_id AND active.project_id=e.project_id
+                    AND active.environment_id=e.environment_id AND active.source_id=e.source_id)
+                ORDER BY CASE WHEN (e.owner_id,e.project_id,e.environment_id,e.source_id)>(?,?,?,?)
+                    THEN 0 ELSE 1 END,e.owner_id,e.project_id,e.environment_id,e.source_id LIMIT 1""",
+                (now, now, now, *previous)).fetchone()
             if first is None:
                 return None
             scope = tuple(first[name] for name in ("owner_id", "project_id", "environment_id", "source_id"))
@@ -297,10 +322,21 @@ class CaptureSpool:
                 size += row["payload_bytes"]
                 value = json.loads(row["payload"])
                 value["ts"] = datetime.fromisoformat(value["ts"])
-                events.append(LogEvent(**value))
+                raw_origin = value.pop("normalization_origin", None)
+                event = LogEvent(**value)
+                if isinstance(raw_origin, dict):
+                    try:
+                        candidate = replace(event, normalization_origin=NormalizationOrigin(**raw_origin))
+                        if validated_normalization_origin(candidate) is not None:
+                            event = candidate
+                    except TypeError:
+                        pass
+                events.append(event)
                 keys.append(row["event_key"])
                 connection.execute("UPDATE raw_events SET lease_token=?,lease_until=? WHERE event_key=?",
                                    (token, now + lease_seconds, row["event_key"]))
+            connection.execute("""INSERT OR REPLACE INTO raw_claim_cursor
+                (singleton,owner_id,project_id,environment_id,source_id) VALUES(1,?,?,?,?)""", scope)
             return CaptureClaim(token, SourceIdentity(*scope), tuple(events), tuple(keys))
 
     def complete(self, claim: CaptureClaim) -> int:

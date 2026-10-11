@@ -1,0 +1,41 @@
+{
+  "repository": "https://github.com/ggml-org/llama.cpp",
+  "revision": "161755f29e415e2c33efe906e91843c068efd664",
+  "tag": "b11081",
+  "ollama_revision": "b2da9e468af2479058ae18c6d908ed29de410684",
+  "ollama_version": "0.34.4",
+  "files": {
+    "llama.h": {
+      "upstream_path": "include/llama.h",
+      "sha256": "0199c9f12a5dd4099191a9b508d62ad715212981d181046a0d29750c57dd8694"
+    },
+    "LICENSE": {
+      "upstream_path": "LICENSE",
+      "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+    },
+    "ggml.h": {
+      "upstream_path": "ggml/include/ggml.h",
+      "sha256": "12ee71f99db7db9b353bc02b1fbb57c344ee17c01ac5fb7952b41a637a747ea9"
+    },
+    "ggml-cpu.h": {
+      "upstream_path": "ggml/include/ggml-cpu.h",
+      "sha256": "316279e004cdeb8e6ef78599acb602bf79a8abdf897fed9fd1914808c1518c6e"
+    },
+    "ggml-backend.h": {
+      "upstream_path": "ggml/include/ggml-backend.h",
+      "sha256": "46d84cb998105f871240864fd0f55446939a2fe86c5c281afa63a010fb1f65a2"
+    },
+    "ggml-opt.h": {
+      "upstream_path": "ggml/include/ggml-opt.h",
+      "sha256": "3586de1bc8a934b5c72339e2b6937b0641e8f149b512231e666f67de0736eea2"
+    },
+    "gguf.h": {
+      "upstream_path": "ggml/include/gguf.h",
+      "sha256": "e56714aab702e5ce62ee587a409643c08f7e93e8fbb77f48ef7cc85075f96fa4"
+    },
+    "ggml-alloc.h": {
+      "upstream_path": "ggml/include/ggml-alloc.h",
+      "sha256": "94e4cd069b9313b2ceb35dacec901981e0bb478d8bb31035b7126be091998c23"
+    }
+  }
+}

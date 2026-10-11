@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 
 import httpx
+from test_native_model_support import guarded_transport
 
 from pipeline.models import LocalModels, ModelUnavailable, OpenAICompatibleModels, validate_endpoint
 from pipeline.types import LogEvent
@@ -22,7 +23,7 @@ class ProviderModelTests(unittest.IsolatedAsyncioTestCase):
                 for i in range(count)]
 
     def configured_models(self, handler):
-        transport = httpx.MockTransport(handler)
+        transport = guarded_transport(handler)
         return (LocalModels(transport=transport),
                 OpenAICompatibleModels("https://models.example/v1", "chat",
                                        transport=transport, embedding_transport=transport))

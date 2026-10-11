@@ -1,4 +1,7 @@
 """Backward replay and exact search when embeddings use compact text."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
+from tests.catalog_selector import select_topics
+from logchat.rag.compact_input import expand_compact_input
 import asyncio
 import json
 from dataclasses import asdict, replace
@@ -31,12 +34,14 @@ def test_compact_summary_lexical_search_retains_selected_exact_identifiers(tmp_p
     from logchat.rag.sections import section_batch, compact_summary_batch
     from logchat.rag.builder import prepare_preserved_batch
     original = prepare_preserved_batch(IDENTITY, [event(1, message='Session renewal rejected user=ExactUserXYZ raw_body_canary')], WINDOW)
-    class Model:
+    class Model(SyntheticPhysicalPreflight):
         local_only=True;preserve_content=True;chat_model='fixture-local'
         async def generate(self,instruction,context,schema):
             if 'items' in context:return {'sections':[[row['ref'] for row in context['items']]]}
-            return {'summary':'A visitor experienced a session renewal rejection.',
-                    'important_fields':[f['field_ref'] for f in context['field_catalog'] if f['key']=='user'], 'uncertainties':[]}
+            context = expand_compact_input(context)
+            assert set(schema['properties']) == {'selections', 'important_fields'}
+            return {**select_topics(context, ['Session renewal rejected']),
+                    'important_fields':[f['field_ref'] for f in context['field_catalog'] if f['key']=='user']}
     async def compact():
         model=Model()
         return await compact_summary_batch(await section_batch(original,model),model)
@@ -51,3 +56,8 @@ def test_compact_summary_lexical_search_retains_selected_exact_identifiers(tmp_p
     hits=store.lexical_search(cell,'ExactUserXYZ',limit=5)
     assert len(hits)==1 and hits[0].chunk==summary
     assert 'ExactUserXYZ' not in hits[0].chunk.summary
+    evidence=json.loads(hits[0].chunk.compact_evidence)
+    assert evidence['version']=='compact-evidence-v3'
+    assert evidence['source_observations'][0]['text']=='Session renewal rejected'
+    assert evidence['source_observations'][0]['event_refs']==['e0']
+    assert any(field['value']=='ExactUserXYZ' for field in evidence['important_fields'])

@@ -164,6 +164,9 @@ class SQLiteSchedulerStore:
                     PRIMARY KEY(scope,event_key));
                 CREATE INDEX IF NOT EXISTS rag_schedule_digest_job ON rag_schedule_event_digests(job_id);
             """)
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(rag_schedule_jobs)")}
+            if "projection_recovery" not in columns:
+                connection.execute("ALTER TABLE rag_schedule_jobs ADD COLUMN projection_recovery INTEGER NOT NULL DEFAULT 0")
         if self.db_path.exists():
             self.db_path.chmod(0o600)
 
@@ -362,11 +365,14 @@ class SQLiteSchedulerStore:
             if not row:
                 return None
             original = _decode(row["payload"])
-            if original == new_batch and all(chunk.compression_version == COMPACT_VERSION for chunk in original.chunks):
+            if _encode(job.batch) != row["payload"]:
+                raise ValueError("refinement_job_payload_changed")
+            if _encode(original) == _encode(new_batch) and all(chunk.compression_version == COMPACT_VERSION for chunk in original.chunks):
                 validate_compact_batch(original)
             else:
-                if job.batch != original:
-                    raise ValueError("refinement_job_payload_changed")
+                if any(chunk.compression_version == COMPACT_VERSION for chunk in original.chunks):
+                    if not row["projection_recovery"]:
+                        raise ValueError("projection_upgrade_requires_explicit_failed_retry")
                 validate_refinement(original, new_batch)
                 payload = _encode(new_batch)
                 if len(payload.encode()) > 3_000_000:
@@ -374,6 +380,20 @@ class SQLiteSchedulerStore:
                 connection.execute("UPDATE rag_schedule_jobs SET payload=? WHERE job_id=?", (payload, job.job_id))
             return ProcessingJob(job.job_id, new_batch, row["attempt"], job.lease_token,
                                  datetime.fromisoformat(row["lease_expires"]))
+
+    def recover_projection(self, job: ProcessingJob, *, now: datetime | None = None) -> ProcessingJob | None:
+        """Apply explicit failed retry authorization under the normal refinement lease."""
+        from logchat.rag.sections import COMPACT_VERSION, upgrade_embedding_projection
+        with self._connection() as connection:
+            row = self._leased(connection, job, _now(now))
+            if not row:
+                return None
+            if _encode(job.batch) != row["payload"]:
+                raise ValueError("refinement_job_payload_changed")
+            if not row["projection_recovery"] or not job.batch.chunks or any(
+                    chunk.compression_version != COMPACT_VERSION for chunk in job.batch.chunks):
+                return job
+        return self.refine(job, upgrade_embedding_projection(job.batch), now=now)
 
     def complete(self, job: ProcessingJob, result: BuildResult,
                  writer: Callable[[sqlite3.Connection, BuildResult], None], *, now: datetime | None = None) -> bool:
@@ -385,7 +405,7 @@ class SQLiteSchedulerStore:
             batch = _decode(row["payload"])
             validate_durable_batch(batch)
             # Re-read durable input; a forged caller job cannot widen scope or alter metrics.
-            if (job.batch != batch or result.batch_id != batch.batch_id or result.coverage != batch.coverage
+            if (_encode(job.batch) != row["payload"] or result.batch_id != batch.batch_id or result.coverage != batch.coverage
                     or tuple(c.chunk for c in result.chunks) != batch.chunks):
                 raise ValueError("Completion must preserve the exact prepared evidence and coverage.")
             if len({c.spec for c in result.chunks}) > 1:
@@ -448,7 +468,7 @@ class SQLiteSchedulerStore:
             raise ValueError("Retry limit must be between 1 and 256.")
         with self._connection(write=True) as connection:
             changed = connection.execute("""UPDATE rag_schedule_jobs SET state='ready',attempt=0,
-                next_attempt=?,error_category=NULL,lease_token=NULL,lease_expires=NULL
+                next_attempt=?,error_category=NULL,lease_token=NULL,lease_expires=NULL,projection_recovery=1
                 WHERE job_id IN(SELECT job_id FROM rag_schedule_jobs WHERE scope=? AND state='failed'
                     ORDER BY sequence LIMIT ?)""", (_stamp(_now(now)), _identity_key(identity), limit))
             return changed.rowcount

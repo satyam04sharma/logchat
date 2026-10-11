@@ -1,4 +1,5 @@
 """Exact local-record and model-section tests; all model outputs are mock fixtures."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -34,7 +35,7 @@ def batch(values=None):
     return prepare_preserved_batch(IDENTITY, values if values is not None else [event(), event(1)], WINDOW)
 
 
-class LocalPartitionModel:
+class LocalPartitionModel(SyntheticPhysicalPreflight):
     local_only = True
     preserve_content = True
     chat_model = "mock-local-sections"
@@ -340,7 +341,7 @@ class SectionTests(unittest.IsolatedAsyncioTestCase):
                 if self.mode == "repair" and "proposed_sections" not in payload:
                     return {"sections": [refs[:-1]]}
                 return result
-        original = batch([event(index, "処理失敗 " * 90) for index in range(6)])
+        original = batch([event(index, "処理失敗 " * 90 + str(index)) for index in range(6)])
         config = SectionConfig(max_items=5, input_character_budget=5000, input_byte_budget=6000)
         for mode in ("together", "repair"):
             model = CaptureRequests(mode)
@@ -417,7 +418,7 @@ class SectionTests(unittest.IsolatedAsyncioTestCase):
             validate_refinement(original, replace(refined, chunks=(changed,)))
 
 
-class LocalSummaryModel:
+class LocalSummaryModel(SyntheticPhysicalPreflight):
     local_only = True
     preserve_content = True
     chat_model = "mock-local-summary"
@@ -564,7 +565,7 @@ class SummaryTests(unittest.IsolatedAsyncioTestCase):
             async def generate(self, *args):
                 if self.calls == 1: raise RuntimeError("PRIVATE_SECOND_SECTION")
                 return await super().generate(*args)
-        separate = await section_batch(batch([event(message="small failure"), event(1, "small failure")]), LocalPartitionModel("separate"))
+        separate = await section_batch(batch([event(message="small failure"), event(1, "small failure on another operation")]), LocalPartitionModel("separate"))
         with self.assertRaises(SectionModelError): await summarize_batch(separate, FailsSecond(quote="small failure"))
         self.assertTrue(all(chunk.compression_version == SECTION_VERSION and chunk.supporting_records is None for chunk in separate.chunks))
 

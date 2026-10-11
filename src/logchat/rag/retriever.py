@@ -24,8 +24,47 @@ from logchat.rag.contracts import (
 )
 from pipeline.redaction import redact_text
 
-IMPLEMENTATION = "scoped-hybrid-rrf-v3"
+IMPLEMENTATION = "scoped-hybrid-rrf-v6"
 _TOKEN = re.compile(r"[A-Za-z0-9][\w.-]{1,79}")
+
+# Closed English scaffolding list, not stemming, synonyms or a topic vocabulary.
+# Negation remains in the original question for independent classification.
+_TOPIC_SCAFFOLDING = frozenset("""
+a an the and or but if then of to in on at by for from with as into through
+is are was were be been being do does did have has had can could would should
+will may might must it its this that these those there their they them we you
+your our i me my what which who when where why how please show find tell give
+explain describe summarize inspect investigate about regarding happened happening
+not no never without any all some during between before after since until
+log logs event events record records source sources service services environment
+environments window period time current previous selected retained observed
+observation observations quote quotes phrase phrases summary summaries evidence
+count counts total metrics measurements missing unknown provenance membership
+memberships checked original discarded unavailable available context exists
+""".split())
+
+
+def _joint_source_topics(question, chunk, observations):
+    """All non-scaffolding terms in ONE checked quote; at least two topics.
+
+    Only whole casefolded tokens match. Context labels and ID/numeric tokens
+    cannot supply the two meaningful words. They are not removed from the
+    joint-support requirement, so extra question constraints fail conservatively.
+    The caller supplies only validated, cell-scoped current observations.
+    """
+    def tokens(text):
+        return {token.casefold() for token in re.findall(r"\w+(?:[.@:/+\-]\w+)*", text)}
+
+    terms = tokens(question) - _TOPIC_SCAFFOLDING
+    context_labels = " ".join((chunk.service, chunk.identity.source_id,
+                               chunk.identity.environment_id, chunk.identity.project_id,
+                               chunk.identity.owner_id))
+    labels = tokens(context_labels) | {
+        word.casefold() for word in re.findall(r"[^\W_]+", context_labels)}
+    meaningful = {term for term in terms - labels - _identifiers(question)
+                  if re.fullmatch(r"[a-z]{3,}", term)}
+    return len(meaningful) >= 2 and any(
+        terms <= tokens(observation["text"]) for observation in observations)
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +265,196 @@ def _hits(cell, values, method, limit, *, preserve_content=False):
     return rows
 
 
+def _requested_identifiers(question):
+    """Infer exact intent from complete values, independently of candidates.
+
+    Email/phone values stay atomic: fragments inside an address or path never
+    become additional AND constraints. Punctuated letter+digit IDs and standalone
+    mixed-case/alphanumeric codes are exact. Uppercase topics, versions and HTTP
+    status codes remain semantic. Source matching is case-sensitive.
+    """
+    # A prose trailing colon introduces a question, rather than extending an
+    # ID. Explicit labels are syntax, while URI schemes and internal value
+    # colons remain part of the complete token.
+    token_question = re.sub(r"(?<!\S)(?:code|id|identifier|email|phone):(?=\S)", "", question, flags=re.IGNORECASE)
+    stripped = token_question.strip().rstrip("?!.:")
+    requested = []
+    # Include the full address/path alphabet rather than splitting at @ or /.
+    # Question length is already bounded at the public entry points.
+    for match in re.finditer(r"\+\d(?:[\d -]*\d)?|[A-Za-z0-9+][\w.@:/+\-]*", token_question):
+        token = match.group().rstrip(".:")
+        if token.startswith("REDACTED_") or re.fullmatch(
+                r"(?:v\d+(?:\.\d+)*(?:[-+][\w.-]+)?|\d+(?:\.\d+)+(?:[-+][\w.-]+)?|HTTP[-_]\d{3})", token, re.IGNORECASE):
+            continue
+        email = re.fullmatch(r"[\w.+\-]+@[\w.\-]+\.[A-Za-z]{2,}", token)
+        phone = (re.fullmatch(r"\+?[\d -]+", token) and
+                 sum(c.isdigit() for c in token) >= 7 and (token.startswith("+") or "-" in token))
+        punctuated_id = (any(c.isalpha() for c in token) and any(c.isdigit() for c in token)
+                         and ("_" in token or "-" in token))
+        standalone_code = (token == stripped and (re.search(r"[a-z][A-Z]", token)
+                           or (any(c.isalpha() for c in token) and any(c.isdigit() for c in token))))
+        if email or phone:
+            # Contacts in explicit lookup intent are literal constraints. A
+            # comparison can ask for alternatives rather than an impossible
+            # same-record AND; retained-field anchors handle known alternatives.
+            contact_lookup = (token == stripped or (not re.search(r"\bcompar(?:e|ing|ison)\b", question, re.IGNORECASE)
+                and re.search(r"\b(?:inspect|investigate|find|lookup|show|email|phone|for|about|with|to)\b|look up", question, re.IGNORECASE)))
+            if contact_lookup:
+                requested.append(token)
+        elif punctuated_id or standalone_code:
+            requested.append(token)
+    return tuple(dict.fromkeys(requested))
+
+
+def _identifier_in_record(identifier, record):
+    # Retained source data only; generated summaries and replay hashes cannot
+    # manufacture support. Original prose may carry an ID without a field.
+    return any(_literal_in_question(identifier, value) for _, value in
+               _scalars({key: value for key, value in record.items() if key != "event_key"}))
+
+
+def _readable_records(candidate, cell=None):
+    """Decode final local sections; omit the derived replay hash, not source data."""
+    from logchat.rag.sections import RECORD_PREFIX, SECTION_VERSION, SUMMARY_VERSION, COMPACT_VERSION, records_for_chunk
+    chunk = candidate.chunk
+    if chunk.compression_version not in {SECTION_VERSION, SUMMARY_VERSION, COMPACT_VERSION}:
+        return None
+    if chunk.compression_version == SECTION_VERSION and not chunk.summary.startswith(RECORD_PREFIX):
+        return None
+    if chunk.compression_version == COMPACT_VERSION:
+        from logchat.rag.sections import active_compact_context
+        rows = active_compact_context(chunk, cell)["retained_events"]
+    else:
+        rows = records_for_chunk(chunk)
+    return tuple({key: value for key, value in row.items() if key != "event_key"} for row in rows)
+
+
+def _literal_candidate_scope(question, cells, by_cell, *, preserve_content=True):
+    """Pure field/record eligibility shared before every candidate cap.
+
+    Derive anchors from the complete scoped candidate pool. Alternatives in one
+    original field are OR; different fields must co-occur in one source record.
+    """
+    from logchat.rag.sections import active_summary
+    if not preserve_content:
+        requested = _requested_identifiers(question)
+        anchors = {("requested_identifier", value): {value} for value in requested}
+        excluded = tuple((candidate.cell_id, candidate.chunk.chunk_id)
+                         for options in by_cell.values() for candidate in options
+                         if not all(_literal_in_question(value, active_summary(candidate.chunk)) for value in requested))
+        filtered = {cell: [candidate for candidate in options
+                          if (candidate.cell_id, candidate.chunk.chunk_id) not in excluded]
+                    for cell, options in by_cell.items()}
+        return filtered, {}, {}, anchors, excluded
+    records, fields, anchors = {}, {}, {}
+    for cell in cells:
+        for candidate in by_cell[cell.cell_id]:
+            key = candidate.cell_id, candidate.chunk.chunk_id
+            decoded = _readable_records(candidate, cell)
+            if decoded is None:
+                continue
+            records[key] = decoded
+            fields[key] = tuple(_record_values(row) for row in decoded)
+            for row in fields[key]:
+                for path, values in row.items():
+                    for value in values:
+                        if _literal_in_question(value, question):
+                            anchors.setdefault(path, set()).add(value)
+    # Existing field anchors preserve same-field comparison alternatives. A
+    # question-derived ID already represented by an anchor needs no additional
+    # AND constraint; wholly unknown IDs must never disappear from eligibility.
+    anchored_values = {value for values in anchors.values() for value in values}
+    requested = tuple(value for value in _requested_identifiers(question)
+                      if not any(_literal_in_question(value, anchor) for anchor in anchored_values))
+    for value in requested:
+        anchors[("requested_identifier", value)] = {value}
+    # Empty projections cannot provide positive evidence without anchors either.
+    empty = {key for key, rows in records.items() if not rows}
+    by_cell = {cell: [candidate for candidate in options
+                     if (cell, candidate.chunk.chunk_id) not in empty]
+               for cell, options in by_cell.items()}
+    if not anchors:
+        return by_cell, records, {}, {}, tuple(sorted(empty))
+    matched, filtered, exclusions = {}, {}, list(sorted(empty))
+    for cell in cells:
+        kept = []
+        for candidate in by_cell[cell.cell_id]:
+            key = candidate.cell_id, candidate.chunk.chunk_id
+            # Alternatives in the same field support comparisons; different
+            # fields must co-occur in one record, never across unrelated people.
+            indices = tuple(index for index, row in enumerate(fields.get(key, ()))
+                            if all((all(_identifier_in_record(value, records[key][index]) for value in values)
+                                    if path[0] == "requested_identifier" else row.get(path, set()) & values)
+                                   for path, values in anchors.items()))
+            if indices:
+                kept.append(candidate)
+                matched[key] = indices
+            else:
+                exclusions.append(key)
+        filtered[cell.cell_id] = kept
+    return filtered, records, matched, anchors, tuple(exclusions)
+
+
+def _fair_candidates(candidates, preferred_services=()):
+    """Fair services, then sources within services; no relevance promotion."""
+    services = {}
+    for candidate in candidates:
+        sources = services.setdefault(candidate.chunk.service, {})
+        sources.setdefault(candidate.chunk.identity.source_id, []).append(candidate)
+
+    def interleave(groups):
+        return tuple(rows[index] for index in range(max((len(rows) for rows in groups), default=0))
+                     for rows in groups if index < len(rows))
+
+    order = [service for service in services if service in preferred_services]
+    order.extend(service for service in services if service not in preferred_services)
+    return interleave([interleave(list(services[service].values())) for service in order])
+
+
+def _requested_services(question, candidates):
+    """Only explicit whole known labels imply multi-service answer breadth."""
+    services = tuple(dict.fromkeys(candidate.chunk.service for candidate in candidates
+                     if _literal_in_question(candidate.chunk.service.casefold(), question.casefold())))
+    return services if len(services) > 1 else ()
+
+
+def _literal_witness_admission(candidates, records, matched, anchors, services=()):
+    """Reserve actual alternative/service witnesses, then fair repetitions.
+
+    This is deterministic candidate admission, never model-selected evidence.
+    A candidate becomes a witness only from its eligible original record values.
+    """
+    alternatives = {path: values for path, values in anchors.items()
+                    if len(values) > 1 and path[0] != "requested_identifier"}
+    seen_values, seen_services, witnesses, repetitions = set(), set(), [], []
+    for candidate in _fair_candidates(candidates, services):
+        key = candidate.cell_id, candidate.chunk.chunk_id
+        values = set()
+        if alternatives:
+            for index in matched.get(key, ()):
+                fields = _record_values(records[key][index])
+                values.update((path, value) for path, requested in alternatives.items()
+                              for value in fields.get(path, set()) & requested)
+        service = candidate.chunk.service
+        if values - seen_values or (service in services and service not in seen_services):
+            witnesses.append(candidate)
+            seen_values.update(values)
+            seen_services.add(service)
+        else:
+            repetitions.append(candidate)
+    return (*witnesses, *repetitions), len(witnesses)
+
+
+def _cap_candidates(question, cell, candidates, scoped, records, matched, anchors, config):
+    services = _requested_services(question, candidates)
+    eligible_keys = {candidate.chunk.chunk_id for candidate in scoped[cell.cell_id]}
+    eligible = [candidate for candidate in candidates if candidate.chunk.chunk_id in eligible_keys]
+    neighbors = [candidate for candidate in candidates if candidate.chunk.chunk_id not in eligible_keys]
+    eligible, witnesses = _literal_witness_admission(eligible, records, matched, anchors, services)
+    ordered = (*eligible, *_fair_candidates(neighbors, services))
+    return tuple(ordered[:config.candidate_limit]), len(ordered) > config.candidate_limit, witnesses > config.candidate_limit
+
+
 def _identifiers(question):
     return {token.casefold() for token in _TOKEN.findall(question)
             if not token.startswith("REDACTED_") and ("_" in token
@@ -233,8 +462,8 @@ def _identifiers(question):
             or (token.isupper() and len(token) >= 3) or re.search(r"[a-z][A-Z]", token))}
 
 
-def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content=False):
-    from logchat.rag.sections import SUMMARY_VERSION, COMPACT_VERSION, records_for_chunk
+def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content=False, uncapped=False):
+    from logchat.rag.sections import SUMMARY_VERSION, COMPACT_VERSION, records_for_chunk, active_summary
     chunks, vectors, lexical = {}, {}, {}
     for hits, target in ((vector_hits, vectors), (lexical_hits, lexical)):
         for hit in hits:
@@ -244,19 +473,42 @@ def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content
             chunks[identifier] = hit.chunk
             target[identifier] = hit
     identifiers = _identifiers(question)
+    requested = _requested_identifiers(question)
+    standalone = requested if len(requested) == 1 and requested[0] == question.strip().rstrip("?!.:") else ()
     candidates, rejected = [], 0
     for identifier, chunk in chunks.items():
         vector, lex = vectors.get(identifier), lexical.get(identifier)
+        observations = ()
+        if chunk.compression_version == COMPACT_VERSION:
+            from logchat.rag.sections import active_compact_context
+            context = active_compact_context(chunk, cell)
+            active_records = context["retained_events"]
+            observations = context["source_observations"]
+            if not active_records:
+                rejected += 1
+                continue
+        else:
+            active_records = records_for_chunk(chunk) if chunk.compression_version == SUMMARY_VERSION else ()
+        if standalone:
+            if preserve_content and chunk.compression_version in {SUMMARY_VERSION, COMPACT_VERSION}:
+                supported = any(_identifier_in_record(standalone[0], row) for row in active_records)
+            else:
+                supported = _literal_in_question(standalone[0], active_summary(chunk, cell))
+            if not supported:
+                rejected += 1
+                continue
         exact = bool(lex and identifiers.intersection(token.casefold() for token in
-                     _TOKEN.findall(chunk.summary + " " + chunk.pattern_id)))
+                     _TOKEN.findall(active_summary(chunk, cell) + " " + chunk.pattern_id)))
         if lex and preserve_content and chunk.compression_version in {SUMMARY_VERSION, COMPACT_VERSION} and not exact:
             # Summary embeddings can omit contacts and arbitrary literal values.
             # Require both an actual lexical hit and exact original-field match;
             # this admits candidates only, never bypassing model relevance.
             exact = any(_literal_in_question(value, question)
-                        for record in records_for_chunk(chunk)
+                        for record in active_records
                         for values in _record_values(record).values() for value in values)
-        if not exact and (vector is None or vector.score < config.min_vector_similarity):
+        joint_topics = (lex is not None and preserve_content and
+                        _joint_source_topics(question, chunk, observations))
+        if not exact and not joint_topics and (vector is None or vector.score < config.min_vector_similarity):
             rejected += 1
             continue
         score = ((1 / (config.rrf_constant + vector.rank)) if vector else 0) + (
@@ -266,7 +518,12 @@ def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content
                                     vector_rank=vector.rank if vector else None,
                                     lexical_rank=lex.rank if lex else None))
     candidates.sort(key=lambda c: (-c.score, -(c.vector_score if c.vector_score is not None else -1), c.chunk.chunk_id))
-    return tuple(candidates[:config.candidate_limit]), rejected, len(candidates) > config.candidate_limit
+    if uncapped:
+        return tuple(candidates), rejected, False
+    scoped, records, matched, anchors, _ = _literal_candidate_scope(
+        question, (cell,), {cell.cell_id: candidates}, preserve_content=preserve_content)
+    candidates, capped, _ = _cap_candidates(question, cell, candidates, scoped, records, matched, anchors, config)
+    return candidates, rejected, capped
 
 
 def _complete(window, rows):
@@ -377,31 +634,57 @@ async def retrieve(question: str, cells: Sequence[RetrievalCell], backend: Searc
     provenance.append(StageProvenance("query_embedding", "ok", IMPLEMENTATION,
                                       model=spec.model, revision=spec.revision,
                                       detail="compatible_query_embedding"))
-    candidates = []
+    pools = {}
     for cell in cells:
         try:
             vectors = _hits(cell, backend.vector_search(cell, vector, limit=config.vector_limit),
                             "vector", config.vector_limit, preserve_content=preserve_content)
             lexical = _hits(cell, backend.lexical_search(cell, question, limit=config.lexical_limit),
                             "lexical", config.lexical_limit, preserve_content=preserve_content)
-            selected, rejected, capped = _rank(cell, vectors, lexical, question, config, preserve_content=preserve_content)
+            ranked, rejected, _ = _rank(cell, vectors, lexical, question, config,
+                                        preserve_content=preserve_content, uncapped=True)
+            if preserve_content:
+                # Keep malformed retained sections local to the failing cell,
+                # before deriving shared anchors across other valid cells.
+                for candidate in ranked:
+                    _readable_records(candidate, cell)
+            pools[cell.cell_id] = (ranked, vectors, lexical, rejected)
         except Exception:
             gaps.append(f"{cell.cell_id}:candidate_search_unavailable_or_invalid")
             provenance.append(StageProvenance("retrieval_cell", "failed", IMPLEMENTATION,
                                               detail=json.dumps({"cell_id": cell.cell_id,
                                                   "reason": "candidate_search_unavailable_or_invalid"})))
             continue
+    scoped, records, matched, anchors, _ = _literal_candidate_scope(
+        question, cells, {cell.cell_id: pools.get(cell.cell_id, ((),))[0] for cell in cells},
+        preserve_content=preserve_content)
+    candidates = []
+    for cell in cells:
+        if cell.cell_id not in pools:
+            continue
+        ranked, vectors, lexical, rejected = pools[cell.cell_id]
+        selected, capped, witnesses_capped = _cap_candidates(
+            question, cell, ranked, scoped, records, matched, anchors, config)
         candidates.extend(selected)
+        if capped:
+            gaps.append(f"{cell.cell_id}:retrieval_candidate_limit_reached")
+        if witnesses_capped:
+            gaps.append(f"{cell.cell_id}:literal_or_service_witnesses_exceed_candidate_limit")
         if not selected:
             gaps.append(f"{cell.cell_id}:no_relevant_candidates")
-        if any(c.chunk.window.start < cell.window.start or c.chunk.window.end > cell.window.end for c in selected):
+        from logchat.rag.sections import COMPACT_VERSION
+        if any(c.chunk.compression_version != COMPACT_VERSION and
+               (c.chunk.window.start < cell.window.start or c.chunk.window.end > cell.window.end) for c in selected):
             gaps.append(f"{cell.cell_id}:boundary_chunk_metrics_not_window_exact")
         detail = {"cell_id": cell.cell_id, "vector_returned": len(vectors),
                   "lexical_returned": len(lexical), "gate_rejected": rejected,
                   "candidates": len(selected), "candidate_cap_reached": capped,
+                  "literal_nonmatching_candidates": len(ranked) - len(scoped[cell.cell_id]),
+                  "literal_or_service_witness_cap_reached": witnesses_capped,
                   "coverage_rows": coverage_counts[cell.cell_id][0],
                   "coverage_cap_reached": coverage_counts[cell.cell_id][1],
                   "score_meaning": "reciprocal_rank_fusion_not_confidence",
+                  "candidate_admission": "shared_literal_eligibility_and_witnesses_then_service_source_round_robin",
                   "similarity_floor": config.min_vector_similarity,
                   "content_policy": "preserved_local_sections" if preserve_content else "redacted_templates",
                   "revalidation_required": True}

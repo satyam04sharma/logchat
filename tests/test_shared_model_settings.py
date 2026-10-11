@@ -1,4 +1,7 @@
 """Shared settings use real local SQLite and mocked local model calls only."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
+from tests.catalog_selector import select_topics
+from logchat.rag.compact_input import expand_compact_input
 import asyncio
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -28,7 +31,7 @@ class Embeddings:
         return [tuple([1.] + [.1] * (self.spec.dimensions - 1)) for _ in texts]
 
 
-class Generation:
+class Generation(SyntheticPhysicalPreflight):
     local_only = True
     preserve_content = True
 
@@ -52,11 +55,16 @@ class Generation:
                 self.state["intake_started"].set()
                 await self.state["intake_release"].wait()
             return {"sections": [[item["ref"] for item in context["items"]]]}
-        return {"summary": "The service reported request failures.", "important_fields": [], "uncertainties": []}
+        context = expand_compact_input(context)
+        assert set(schema['properties']) == {'selections', 'important_fields'}
+        return {**select_topics(context, ["Request failed"]),
+                "important_fields": [field["field_ref"] for field in context["field_catalog"] if field["key"] == "error_code"]}
 
 
 @pytest.fixture
 def models(monkeypatch):
+    from tests.synthetic_embedding_admission import install
+    install(monkeypatch)
     state = {"calls": [], "requests": [], "embedding_calls": [], "revision": "stable-embedding-revision",
              "metadata": {"old:7b": {"capabilities": ["completion"]},
                           "new:7b": {"capabilities": ["completion", "tools"]},

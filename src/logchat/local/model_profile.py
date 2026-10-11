@@ -34,6 +34,22 @@ class ModelProfile:
             model=self.config['embedding']['model'],dimensions=self.config['embedding']['dimensions'],
             preserve_content=self.preserve_content)
 
+    async def plan_embedding_batch(self, batch, *, deadline):
+        """Fresh post-selection physical admission; no historical job mutation."""
+        from logchat.rag.contracts import EmbeddingSpec
+        from logchat.rag.embeddings import OllamaEmbeddingProvider
+        from logchat.rag.embedding_subdivision import plan_embedding_subdivision
+        from pipeline.model_transport import model_json
+        config = model_json(self.config)
+        models = self.generation('summary')
+        provider = OllamaEmbeddingProvider(self.config['base_url'],
+            spec=EmbeddingSpec(**self.config['embedding']), transport=models.transport,
+            preserve_content=self.preserve_content)
+        plan = await plan_embedding_subdivision(batch, provider, models, deadline=deadline)
+        if model_json(self.config) != config:
+            raise ValueError('subdivision_profile_drift')
+        return plan
+
     def public(self):
         return {'provider':'ollama','endpoint':self.config['base_url'],'generation_model':self.generation_model,
                 'chunking_model':self.generation_model,'embedding_model':self.config['embedding']['model'],

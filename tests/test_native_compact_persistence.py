@@ -1,4 +1,6 @@
 """Real SQLite/WAL privacy boundaries; all generation and embedding calls mocked."""
+from logchat.rag.compact_input import expand_compact_input
+from tests.physical_preflight import SyntheticPhysicalPreflight
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -31,7 +33,7 @@ class Embeddings:
         return [(1., .1, .2, .3, .4, .5, .6, .7) for _ in texts]
 
 
-class Generation:
+class Generation(SyntheticPhysicalPreflight):
     local_only = True
     preserve_content = True
     chat_model = "mock-compact"
@@ -52,13 +54,19 @@ class Generation:
         if "items" in context:
             return {"sections": [[item["ref"] for item in context["items"]]]}
         assert "records" in context
-        return {"summary": "The service reported a request failure.",
-                "important_fields": [field["field_ref"] for field in context["field_catalog"]
-                                     if field["key"] == "error_code"], "uncertainties": []}
+        context = expand_compact_input(context)
+        from tests.catalog_selector import select_topics
+        result = select_topics(context, ['Request failed'])
+        result['important_fields'] = [field['field_ref'] for field in context['field_catalog']
+                                     if field['key'] == 'error_code']
+        return result
+
 
 
 @pytest_asyncio.fixture
 async def configured(tmp_path, monkeypatch):
+    from tests.synthetic_embedding_admission import install
+    install(monkeypatch)
     async def create(**kwargs):
         return Embeddings()
     model = Generation()
@@ -89,6 +97,110 @@ def assert_no_originals(store):
         for path in store.state_dir.iterdir():
             if path.is_file():
                 assert token.encode() not in path.read_bytes(), path.name
+
+
+def intake_diagnostics(caplog):
+    return [json.loads(record.getMessage().removeprefix("native_intake "))
+            for record in caplog.records if record.getMessage().startswith("native_intake ")]
+
+
+@pytest.mark.asyncio
+async def test_runtime_passes_trusted_views_to_grouping_and_compact_with_canonical_catalog(configured):
+    from connectors.local import parse_push_events
+    store, project, source, model = configured
+    events = parse_push_events([
+        {"event_id": f"projection-{index}", "message": "Request failed " + RAW,
+         "timestamp": "2026-10-10T00:00:00Z", "duration_ms": index + .5,
+         "request_status": 503, "error_code": "LIB042"}
+        for index in range(12)], source=source["id"], preserve_fields=True)
+    receipt = await store.rag_runtime.ingest_async(project["id"], source["id"], events)
+    grouping = [call for call in model.calls if "items" in call]
+    assert len(grouping) == 1 and len(grouping[0]["items"]) == 1
+    message = grouping[0]["items"][0]["messages"][0]
+    assert RAW in message and "LIB042" in message and "projection-" not in message
+    compact = [expand_compact_input(call) for call in model.calls if "records" in call]
+    assert len(compact) == 1 and len(compact[0]["records"]) == 12
+    assert {row["message"] for row in compact[0]["records"]} == {message}
+    assert {field["value"] for field in compact[0]["field_catalog"] if field["key"] == "event_id"} == {
+        event.event_id for event in events}
+    assert compact[0]["exact_metrics"]["event_count"] == 12
+    assert compact[0]["exact_metrics"]["duration_sum_ms"] == 72
+    assert receipt["accepted"] == 12 and receipt["jobs"]
+    calls = len(model.calls)
+    replay = await store.rag_runtime.ingest_async(project["id"], source["id"], events)
+    assert replay["deduplicated"] == 12 and len(model.calls) == calls
+    assert_no_originals(store)
+
+
+@pytest.mark.asyncio
+async def test_intake_diagnostics_count_calls_and_preserve_model_requests(configured, caplog):
+    caplog.set_level("INFO", logger="logchat.local.rag_runtime")
+    store, project, source, model = configured
+    original = event(source)
+    result = await store.rag_runtime.ingest_async(project["id"], source["id"], [original])
+    records = intake_diagnostics(caplog)
+    finished = records[-1]
+    assert finished["kind"] == "finished" and finished["status"] == "ok"
+    assert finished["calls"] == {"chunking": 1, "summary": 1}
+    assert len(model.calls) == sum(finished["calls"].values())
+    assert {record["stage"] for record in records} == {
+        "admission", "prepare", "grouping", "compact", "validate_enqueue"}
+    assert len({record["intake"] for record in records}) == 1
+    assert result["jobs"] and result["accepted"] == 1
+    logged = caplog.text
+    for private in (RAW, FINGERPRINT, original.event_id, source["id"], project["id"], model.chat_model):
+        assert private not in logged
+    assert_no_originals(store)
+    caplog.clear()
+    replay = await store.rag_runtime.ingest_async(project["id"], source["id"], [original])
+    assert replay["deduplicated"] == 1
+    assert intake_diagnostics(caplog)[-1]["calls"] == {"chunking": 0, "summary": 0}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["provider", "cancel", "deadline"])
+@pytest.mark.parametrize("stage", ["grouping", "compact"])
+async def test_intake_diagnostics_identify_unfinished_stage_without_error_content(
+        configured, caplog, monkeypatch, failure, stage):
+    from logchat.local import rag_runtime
+    caplog.set_level("INFO", logger="logchat.local.rag_runtime")
+    store, project, source, model = configured
+    if failure == "provider":
+        model.fail = True
+    else:
+        model.started, model.release = asyncio.Event(), asyncio.Event()
+    if stage == "compact":
+        generate = model.generate
+
+        async def fail_only_compact(instruction, context, schema):
+            if "items" in context:
+                model.calls.append(context)
+                return {"sections": [[item["ref"] for item in context["items"]]]}
+            return await generate(instruction, context, schema)
+
+        monkeypatch.setattr(model, "generate", fail_only_compact)
+    if failure == "deadline":
+        timeout = asyncio.timeout
+        monkeypatch.setattr(rag_runtime.asyncio, "timeout", lambda seconds: timeout(.05 if seconds == 300 else seconds))
+    task = asyncio.create_task(store.rag_runtime.ingest_async(project["id"], source["id"], [event(source)]))
+    if failure == "cancel":
+        await model.started.wait()
+        task.cancel()
+    with pytest.raises(asyncio.CancelledError if failure == "cancel" else ModelUnavailable):
+        await task
+    records = intake_diagnostics(caplog)
+    finished = records[-1]
+    assert finished["stage"] == stage
+    assert finished["status"] == ("cancelled" if failure == "cancel" else "failed")
+    assert finished["calls"] == {"chunking": 1, "summary": int(stage == "compact")}
+    assert records[-2]["kind"] == "model_finished"
+    assert records[-2]["status"] == ("failed" if failure == "provider" else "cancelled")
+    assert finished["stage_seconds"] >= 0 and finished["seconds"] >= finished["stage_seconds"]
+    assert RAW not in caplog.text and FINGERPRINT not in caplog.text
+    assert_no_originals(store)
+    # Failure and cancellation still release the shared intake/settings slot.
+    model.fail, model.started = False, None
+    assert (await store.rag_runtime.ingest_async(project["id"], source["id"], [event(source)]))["jobs"]
 
 
 @pytest.mark.asyncio
@@ -229,6 +341,61 @@ async def test_async_intake_has_bounded_concurrency_and_releases_slot_after_fail
 
 
 @pytest.mark.asyncio
+async def test_summary_only_sources_take_reserved_retry_turns_across_entrypoints(configured, monkeypatch):
+    from logchat.local import rag_runtime
+    from logchat.rag.scheduler import _identity_key
+    monkeypatch.setattr(rag_runtime, "_INTAKE_SLOT", rag_runtime._FairIntakeSlot())
+    store, project, hot, model = configured
+    cold = store.create_source(project["id"], "cold", "dev", "push", None)
+    third = store.create_source(project["id"], "third", "dev", "push", None)
+    model.started, model.release = asyncio.Event(), asyncio.Event()
+    task = asyncio.create_task(store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot)]))
+    await model.started.wait()
+    for source in (cold, third, cold):
+        with pytest.raises(ModelUnavailable, match="intake_busy"):
+            await store.rag_runtime.ingest_async(project["id"], source["id"], [event(source)])
+    model.release.set()
+    await task
+    model.started = None
+    with pytest.raises(ModelUnavailable, match="intake_busy"):
+        store.rag_runtime.ingest(project["id"], hot["id"], [event(hot, identifier="hot-second")])
+    # A synchronous retry consumes the same reservation as async ingestion.
+    cold_receipt = await asyncio.to_thread(store.rag_runtime.ingest, project["id"], cold["id"], [event(cold)])
+    assert cold_receipt["accepted"] == 1
+    with pytest.raises(ModelUnavailable, match="intake_busy"):
+        await store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot, identifier="hot-second")])
+    assert (await store.rag_runtime.ingest_async(project["id"], third["id"], [event(third)]))["accepted"] == 1
+    assert (await store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot, identifier="hot-second")]))["accepted"] == 1
+    for source, expected in ((hot, 2), (cold, 1), (third, 1)):
+        identity = store.rag_runtime.identity(project["id"], source["id"])
+        with store.rag_runtime.backend.connect() as connection:
+            assert connection.execute("SELECT count(*) FROM rag_schedule_event_digests WHERE scope=?", (_identity_key(identity),)).fetchone()[0] == expected
+    assert_no_originals(store)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_intake_releases_slot_to_waiting_source(configured, monkeypatch):
+    from logchat.local import rag_runtime
+    monkeypatch.setattr(rag_runtime, "_INTAKE_SLOT", rag_runtime._FairIntakeSlot())
+    store, project, hot, model = configured
+    cold = store.create_source(project["id"], "cold", "dev", "push", None)
+    model.started, model.release = asyncio.Event(), asyncio.Event()
+    task = asyncio.create_task(store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot)]))
+    await model.started.wait()
+    with pytest.raises(ModelUnavailable, match="intake_busy"):
+        await store.rag_runtime.ingest_async(project["id"], cold["id"], [event(cold)])
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    model.started = None
+    with pytest.raises(ModelUnavailable, match="intake_busy"):
+        await store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot)])
+    assert (await store.rag_runtime.ingest_async(project["id"], cold["id"], [event(cold)]))["accepted"] == 1
+    assert (await store.rag_runtime.ingest_async(project["id"], hot["id"], [event(hot)]))["accepted"] == 1
+    assert_no_originals(store)
+
+
+@pytest.mark.asyncio
 async def test_file_watcher_retries_top_level_poll_failure_without_crashing(configured, monkeypatch):
     store, _, _, _ = configured
     capture = FileCapture(store)
@@ -249,3 +416,112 @@ async def test_file_watcher_retries_top_level_poll_failure_without_crashing(conf
         assert capture.task is not None and not capture.task.done()
     finally:
         await capture.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capture_mode", ["summary_only", "retain_until_summarized"])
+@pytest.mark.parametrize("explicit_fingerprint", [False, True])
+async def test_canonical_parser_upgrade_replay_and_restart(configured, capture_mode, explicit_fingerprint):
+    """Frozen pre-optimization canonical evidence must survive the parser upgrade."""
+    from connectors.local import parse_event
+    from logchat.local.raw_capture import content_digest, save_capture_policy
+
+    store, project, source, model = configured
+    body = {"event_id": "canonical-1542801", "message": "Request failed request 777",
+            "timestamp": "2026-10-10T12:00:00Z", "error_code": "RARE-042",
+            "duration_ms": 17, "request_status": 503, "release": "r1"}
+    # Recorded from the parser preceding 8c094f1, independently of candidate normalization.
+    canonical_message = ('Request failed request 777\nStructured fields: '
+                         '{"error_code": "RARE-042", "event_id": "canonical-1542801"}')
+    inferred = "d386bd79213873270861d5ea9940350fa6a1872b5807a58547480cb88dbb7093"
+    if explicit_fingerprint:
+        body["fingerprint"] = "producer-fingerprint"
+    legacy = LogEvent(body["event_id"], datetime(2026, 10, 10, 12, tzinfo=timezone.utc),
+                      "fixture-source", "application", "info", canonical_message,
+                      body.get("fingerprint", inferred), release="r1", duration_ms=17.0, request_status=503)
+    if not explicit_fingerprint:
+        assert content_digest(legacy) == "765a7354dd8a64255dbdf821ac1831ac5f10fe17fd07cdf3b771e7f2102c2750"
+    legacy = replace(legacy, source=source["id"])
+    save_capture_policy(store.state_dir, mode=capture_mode)
+    receipt = await store.rag_runtime.ingest_async(project["id"], source["id"], [legacy])
+    assert receipt["accepted"] == 1 and receipt["deduplicated"] == 0
+    calls = len(model.calls)
+    for runtime in (store.rag_runtime, LocalStore(store.state_dir).rag_runtime):
+        candidate = parse_event(body, source=source["id"], preserve_fields=True)
+        assert candidate == legacy
+        # Exercise the actual HTTP parse boundary with the unchanged old body.
+        import httpx
+        from logchat.local.app import create_app
+        app = create_app(store.state_dir, 18949, capture_host=False)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                    base_url="http://127.0.0.1:18949") as client:
+            response = await client.post(f"/projects/{project['id']}/events",
+                json={"source_id": source["id"], "events": [body]},
+                headers={"Authorization": "Bearer " + source["token"]})
+            assert response.status_code == 200
+            assert response.json()["deduplicated"] == 1
+            changed_response = await client.post(f"/projects/{project['id']}/events",
+                json={"source_id": source["id"], "events": [{**body, "message": "changed"}]},
+                headers={"Authorization": "Bearer " + source["token"]})
+            assert changed_response.status_code == 503
+            assert changed_response.headers["X-Logchat-Processing-Category"] == "event_identity_content_conflict"
+        replay = await runtime.ingest_async(project["id"], source["id"], [candidate])
+        assert replay["deduplicated"] == 1
+        assert not replay.get("jobs")
+        # Every changed replay must fail before generation or durable replacement.
+        for change in ({"message": "Changed request 778"}, {"error_code": "OTHER-043"},
+                       {"request_status": 504}, {"duration_ms": 18}, {"release": "r2"},
+                       {"fingerprint": "changed-fingerprint"}):
+            changed = parse_event({**body, **change}, source=source["id"], preserve_fields=True)
+            with pytest.raises(ModelUnavailable, match="event_identity_content_conflict"):
+                await runtime.ingest_async(project["id"], source["id"], [changed])
+        with pytest.raises(ModelUnavailable, match="event_identity_content_conflict"):
+            await runtime.ingest_async(project["id"], source["id"], [replace(candidate, source="changed-source")])
+        assert len(model.calls) == calls
+    if capture_mode == "summary_only":
+        for path in store.state_dir.iterdir():
+            if path.is_file():
+                assert canonical_message.encode() not in path.read_bytes()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['deadline', 'cancel'])
+async def test_physical_preflight_uses_existing_intake_deadline_and_releases_slot(configured, monkeypatch, failure):
+    from logchat.local import rag_runtime
+    store, project, source, model = configured
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+    original_preflight = model.preflight_generation
+    original_timeout = asyncio.timeout
+    seen_deadlines = []
+
+    def timeout(seconds):
+        seen_deadlines.append(seconds)
+        return original_timeout(.05 if seconds == 300 else seconds)
+
+    async def waiting(*args):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(model, 'preflight_generation', waiting)
+    if failure == 'deadline':
+        monkeypatch.setattr(rag_runtime.asyncio, 'timeout', timeout)
+    original = event(source)
+    task = asyncio.create_task(store.rag_runtime.ingest_async(project['id'], source['id'], [original]))
+    await entered.wait()
+    if failure == 'cancel':
+        task.cancel()
+    with pytest.raises(asyncio.CancelledError if failure == 'cancel' else ModelUnavailable):
+        await task
+    assert cancelled.is_set()
+    assert all('items' in call for call in model.calls)
+    if failure == 'deadline':
+        assert seen_deadlines == [300]
+    with store.rag_runtime.backend.connect() as connection:
+        assert connection.execute('SELECT COUNT(*) FROM rag_schedule_jobs').fetchone()[0] == 0
+    monkeypatch.setattr(model, 'preflight_generation', original_preflight)
+    monkeypatch.setattr(rag_runtime.asyncio, 'timeout', original_timeout)
+    receipt = await store.rag_runtime.ingest_async(project['id'], source['id'], [original])
+    assert receipt['accepted'] == 1 and receipt['jobs']

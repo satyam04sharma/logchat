@@ -1,4 +1,7 @@
 """Temporary originals use real SQLite; every generation/embedding provider is mocked."""
+from tests.physical_preflight import SyntheticPhysicalPreflight
+from tests.catalog_selector import select_topics
+from logchat.rag.compact_input import expand_compact_input
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -117,6 +120,59 @@ def test_turning_capture_off_keeps_existing_pending_and_shorter_ttl_applies(spoo
     assert spool.status(now=1061)["expired_events"] == 1
 
 
+def test_capture_claims_rotate_scopes_despite_older_backlog_and_restart(spool):
+    identities = [replace(IDENTITY, source_id=f"source-{letter}") for letter in "abc"]
+    spool.enqueue(identities[0], [event(str(i)) for i in range(801)], now=1000)
+    for identity in identities[1:]:
+        spool.enqueue(identity, [event(str(i)) for i in range(2)], now=1001)
+    claimed_keys = set()
+    totals = {identity: 0 for identity in identities}
+    turns = []
+    for _ in range(5):
+        # A freshly constructed spool must preserve the preceding turn.
+        restarted = CaptureSpool(spool.state_dir)
+        claim = restarted.claim(now=1002)
+        turns.append(claim.identity)
+        assert not claimed_keys.intersection(claim.event_keys)
+        claimed_keys.update(claim.event_keys)
+        assert len(claim.events) <= 400
+        totals[claim.identity] += restarted.complete(claim)
+    assert turns == [identities[0], identities[1], identities[2], identities[0], identities[0]]
+    assert totals == dict(zip(identities, [801, 2, 2]))
+    status = spool.status(now=1002)
+    assert status["pending_events"] == 0
+    assert status["completed_events"] == status["accepted_events"] == 805
+
+
+def test_capture_fairness_uses_full_scope_and_skips_active_and_delayed_sources(spool):
+    identities = [IDENTITY, replace(IDENTITY, environment_id="env-b"),
+                  replace(IDENTITY, project_id="project-b"), replace(IDENTITY, owner_id="other-owner")]
+    for identity in identities:
+        spool.enqueue(identity, [event("same-id"), event("other-id")], now=1000)
+    active = spool.claim(now=1001, limit=1)
+    assert active.identity == identities[0]
+    delayed = spool.claim(now=1001)
+    assert delayed.identity == identities[1]
+    spool.fail(delayed, now=1001, retry_seconds=30)
+    # The first scope has an unleased event but cannot acquire another active
+    # claim. The second scope's retry delay must not block the other scopes.
+    for identity in identities[2:]:
+        claim = spool.claim(now=1002)
+        assert claim.identity == identity
+        assert len(claim.event_keys) == 2
+        spool.complete(claim)
+    assert spool.claim(now=1002) is None
+    spool.complete(active)
+    remaining = spool.claim(now=1003)
+    assert remaining.identity == identities[0]
+    spool.complete(remaining)
+    retry = CaptureSpool(spool.state_dir).claim(now=1031)
+    assert retry.identity == identities[1]
+    assert retry.event_keys == delayed.event_keys
+    spool.complete(retry)
+    assert spool.status(now=1032)["pending_events"] == 0
+
+
 class Embeddings:
     spec = EmbeddingSpec("ollama", "mock-raw-capture", "mock-digest", 8)
     preserve_content = True
@@ -127,7 +183,7 @@ class Embeddings:
         return [(1., .1, .2, .3, .4, .5, .6, .7) for _ in texts]
 
 
-class Generation:
+class Generation(SyntheticPhysicalPreflight):
     local_only = True
     preserve_content = True
     chat_model = "mock-capture-model"
@@ -142,9 +198,10 @@ class Generation:
             raise RuntimeError(RAW)
         if "items" in context:
             return {"sections": [[item["ref"] for item in context["items"]]]}
-        return {"summary": "The service reported request errors.",
-                "important_fields": [field["field_ref"] for field in context["field_catalog"] if field["key"] == "error_code"],
-                "uncertainties": []}
+        context = expand_compact_input(context)
+        assert set(schema['properties']) == {'selections', 'important_fields'}
+        return {**select_topics(context, ["Request failed"]),
+                "important_fields": [field["field_ref"] for field in context["field_catalog"] if field["key"] == "error_code"]}
 
 
 @pytest.fixture
@@ -157,6 +214,8 @@ def raw_runtime(tmp_path):
 
 
 async def configure_mock(store, monkeypatch):
+    from tests.synthetic_embedding_admission import install
+    install(monkeypatch)
     model = Generation()
     async def create(**kwargs):
         return Embeddings()
