@@ -39,3 +39,13 @@ Acceptance: define the intended repeated-observation selection contract, preserv
 Use `scripts/qa_100k.py` and `examples/loadtest/README.md` with fresh state and the explicitly selected Mistral 7B/nomic-embed-text profile. Replication uses 151 sanitized Loghub templates weighted by 6,000 sampled rows, not 100,000 unique original dataset rows. See [Loghub](https://github.com/logpai/loghub) for dataset attribution.
 
 After fixes, run the regression suite, installed-wheel browser checks, fresh concurrent 100K ingestion/indexing, incident/paraphrase/negative/scope/citation checks and restart/replay. Preserve failed cycles as evidence; success requires exact generated, admitted and indexed totals. Keep the native service on loopback and leave unrelated services intact.
+
+## Correction cycle status
+
+The release branch contains independently reviewed corrections for absent-ID eligibility, repeated-observation relevance instructions, native source counts, source-fairness admission and capture rotation, and transient exact-message grouping cohorts. Retrieval review also caught and corrected atomic email parsing, semantic version/HTTP-status filtering, and trailing question-colon handling. Focused regressions cover these cases; actual browser/model selection remains a separate gate.
+
+After integration, 648 tests and 244 subtests passed with one opt-in model test skipped. The native renderer, build, two-artifact structure audit, 71-file installed-wheel byte audit, and 28 CLI/adapter contracts passed. These checks do not establish 100K completion.
+
+A fresh real Mistral 7B/nomic-embed-text check sent 400 unique web events with six distinct messages and one rare incident through native summary-only HTTP intake. It failed after 300.052 seconds with `compact_intake_unavailable_retry_required`, phase `intake`. Indexed events, vectors, event keys, event digests and scheduled jobs were all zero. The owned server was stopped. The initial fixture setup omitted the required environment and stopped before ingestion; that setup error was corrected in fresh state before this measured run.
+
+This cycle confirms that the grouping optimization alone has not resolved native preparation throughput. The release remains blocked pending a verified preparation correction, actual 400-event completion, installed-browser recall, and a fresh fully indexed 100K cycle. The acceptance harness now checks every expected synthetic event ID and source-ledger key, exact per-source durations/status counts, no pending or failed work, three-service incident context, negative/scope/auth checks, and capture restart/replay. Its accounting gate independently rejected disposable copies with a missing event or changed duration total.
