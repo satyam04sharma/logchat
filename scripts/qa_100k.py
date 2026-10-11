@@ -11,7 +11,7 @@ sys.path.insert(0,str(ROOT/'src'))
 def save(path,value):
     tmp=path.with_suffix('.tmp'); tmp.write_text(json.dumps(value,indent=2)); tmp.replace(path)
 
-def datasets(root):
+def datasets(root, target=100000):
     provenance=[]; result={}
     names=['Apache','Linux','OpenSSH']
     with httpx.Client(trust_env=False,timeout=60,follow_redirects=True) as client:
@@ -36,7 +36,7 @@ def datasets(root):
                 derived.append(dict(event_id=row['EventId'],message=text,weight=frequencies.get(row['EventId'],0)))
             result[name]=derived
             provenance[-1]['sanitized_replication_templates']=derived
-    save(root/'dataset-provenance.json',dict(source='Loghub',source_unique_sample_rows=6000,generated_event_target=100000,replication='Frequency-weighted sanitized EventTemplate replication with synthetic placeholder values; original messages never copied',files=provenance))
+    save(root/'dataset-provenance.json',dict(source='Loghub',source_unique_sample_rows=6000,generated_event_target=target,replication='Frequency-weighted sanitized EventTemplate replication with synthetic placeholder values; original messages never copied',files=provenance))
     return result
 
 def counts(state):
@@ -147,7 +147,7 @@ def main():
     if (state/'local.db').exists():raise RuntimeError('fresh_state_required')
     import psutil
     save(root/'host-resource-snapshot.json',dict(cpu_percent=psutil.cpu_percent(interval=1),memory_available_bytes=psutil.virtual_memory().available,memory_total_bytes=psutil.virtual_memory().total,load_average=os.getloadavg(),existing_native_service_count=sum('logchat.local.server' in ' '.join(proc.info.get('cmdline') or []) for proc in psutil.process_iter(['cmdline']))))
-    templates=datasets(root); profile=json.loads(a.profile.read_text())
+    templates=datasets(root,a.count); profile=json.loads(a.profile.read_text())
     from logchat.local.rag_runtime import configure
     asyncio.run(configure(state,base_url=profile['base_url'],model=profile['embedding']['model'],dimensions=profile['embedding']['dimensions'],chat_model=profile['generation_model'],content_policy=profile['content_policy']))
     env=dict(os.environ,PYTHONPATH=str(ROOT/'src'),LOGCHAT_CAPTURE_HOST='0',LOGCHAT_LOCAL_DIR=str(state),LOGCHAT_SECRETS_DIR=str(root/'credentials'))
