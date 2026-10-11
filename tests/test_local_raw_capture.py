@@ -197,7 +197,7 @@ class Generation(SyntheticPhysicalPreflight):
             raise RuntimeError(RAW)
         if "items" in context:
             return {"sections": [[item["ref"] for item in context["items"]]]}
-        assert set(schema['properties']) == {'phrase_refs', 'important_fields'}
+        assert set(schema['properties']) == {'selections', 'important_fields'}
         return {**select_topics(context, ["Request failed"]),
                 "important_fields": [field["field_ref"] for field in context["field_catalog"] if field["key"] == "error_code"]}
 

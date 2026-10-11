@@ -1,6 +1,8 @@
 """Positive mock failures stay visible instead of becoming empty selections."""
 import pytest
 
+from tests.catalog_selector import role_selections
+
 from logchat.rag.source_catalog import SELECTOR_PROTOCOL
 from tests.catalog_selector import select_topics
 
@@ -28,9 +30,9 @@ def test_positive_mock_requires_offered_topic_with_complete_membership(catalog):
 
 def test_positive_mock_selects_exact_topic_membership_not_first_item():
     result = select_topics(payload([["p0", "east"], ["p1", "dispatch delayed"]]), ["dispatch delayed"])
-    assert result == {"phrase_refs": ["p1"], "important_fields": []}
+    assert result == {"selections": role_selections(["p1"]), "important_fields": []}
 
 
 def test_other_packed_request_requires_explicit_absence_permission():
     assert select_topics(payload([]), ["other section"], allow_absent_topics=True) == {
-        "phrase_refs": [], "important_fields": []}
+        "selections": [], "important_fields": []}

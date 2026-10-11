@@ -123,7 +123,7 @@ async def test_exact_counter_and_generation_hook_receive_projected_complete_body
     source, views, options = await fixture(['operation failed with rare detail'] * 4)
     chunk = source.chunks[0]
     instruction = CATALOG_COMPACT_INSTRUCTION if catalog else COMPACT_INSTRUCTION
-    selection_key = 'phrase_refs' if catalog else 'source_phrases'
+    selection_key = 'selections' if catalog else 'source_phrases'
     response = {selection_key: [], 'important_fields': []}
     payload, schema, _, _ = _compact_request(
         chunk, records_for_chunk(chunk), SummaryConfig(), views, **(options if catalog else {}))

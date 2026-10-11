@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from tests.catalog_selector import role_selections
+
 from logchat.rag.compact_input import COMPACT_INPUT_VERSION, expand_compact_input
 from logchat.rag.sections import (
     CATALOG_COMPACT_INSTRUCTION, SectionModelError, SummaryConfig, _compact_request,
@@ -82,7 +84,7 @@ async def test_one_global_catalog_used_before_packing_and_for_every_request(monk
                         ('message', 'timestamp', 'request_status', 'duration_ms')}}
         for chunk in source.chunks for row in records_for_chunk(chunk)]
     for chunk in compact.chunks:
-        assert 'selector_protocol:source-catalog-selector-v2' in chunk.loss_notes
+        assert 'selector_protocol:source-catalog-selector-v3' in chunk.loss_notes
         assert len(validate_compact_chunk(chunk)['important_fields']) == 33
     serialized = json.dumps(asdict(compact), default=str)
     assert 'phrase_catalog' not in serialized and 'payload_7f93' not in serialized
@@ -96,7 +98,7 @@ async def test_late_unknown_ref_is_atomic_after_feasible_valid_calls():
         async def generate(self, *args):
             result = await super().generate(*args)
             if len(self.calls) == 3:
-                result['phrase_refs'].append('unknown')
+                result['selections'].extend(role_selections(['unknown']))
             return result
     model = Late(['Request failed'])
     with pytest.raises(SectionModelError, match='compact_invalid_output'):

@@ -17,7 +17,7 @@ class SummaryModel(SyntheticPhysicalPreflight):
     async def generate(self,instruction,context,schema):
         if 'items' in context:return {'sections':[[r['ref'] for r in context['items']]]}
         fields=[field['field_ref'] for field in context['field_catalog'] if field['key'] in {'email','phone','error_code'}]
-        assert set(schema['properties']) == {'phrase_refs', 'important_fields'}
+        assert set(schema['properties']) == {'selections', 'important_fields'}
         return {**select_topics(context, ['Session renewal rejected']),
                 'important_fields':fields}
 

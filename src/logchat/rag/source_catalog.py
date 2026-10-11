@@ -16,7 +16,8 @@ from logchat.rag.source_observations import (
     select_observations,
 )
 
-SELECTOR_PROTOCOL = "source-catalog-selector-v2"
+SELECTOR_PROTOCOL = "source-catalog-selector-v3"
+SELECTION_ROLES = ("operation_subject", "outcome", "context")
 MAX_PROPOSALS = 65536
 MAX_CATALOG_PHRASES = 4096
 MAX_PROPOSAL_WORDS = 6
@@ -368,20 +369,32 @@ def select_catalog_observations(value, records, source_views, protected_bodies,
                                 field_refs, catalog, *, output_budget):
     """Strict new transport; validate ALL incoming refs before deduplication.
 
-    At most four phrase and 64 field refs may arrive, even if redundant. Exact
+    Roles are unverified, call-local intentions and are discarded before expansion.
+    At most four selections and 64 field refs may arrive, even if redundant. Exact
     repeated known refs are normalized in first-occurrence order. Unknown IDs,
     invalid types and extra keys cannot hide behind redundancy. The caller owns
     the unchanged mandatory field union check.
     """
-    if (not isinstance(value, dict) or set(value) != {"phrase_refs", "important_fields"}
+    if (not isinstance(value, dict) or set(value) != {"selections", "important_fields"}
             or len(_json(value)) > output_budget):
         raise ValueError("invalid_source_catalog_output")
     bound = catalog.bind(records, source_views, protected_bodies)
     lookup = {item["phrase_ref"]: item for item in bound}
-    refs = value["phrase_refs"]
-    if (not isinstance(refs, list) or len(refs) > MAX_PHRASES
-            or any(not isinstance(ref, str) or ref not in lookup for ref in refs)):
+    selections = value["selections"]
+    if not isinstance(selections, list) or len(selections) > MAX_PHRASES:
         raise ValueError("invalid_source_catalog_refs")
+    refs = []
+    for selection in selections:
+        if (not isinstance(selection, dict) or set(selection) != {"phrase_ref", "roles"}
+                or not isinstance(selection["phrase_ref"], str)
+                or selection["phrase_ref"] not in lookup):
+            raise ValueError("invalid_source_catalog_refs")
+        roles = selection["roles"]
+        if (not isinstance(roles, list) or not 1 <= len(roles) <= len(SELECTION_ROLES)
+                or any(not isinstance(role, str) or role not in SELECTION_ROLES for role in roles)
+                or len(set(roles)) != len(roles)):
+            raise ValueError("invalid_source_catalog_roles")
+        refs.append(selection["phrase_ref"])
     fields = value["important_fields"]
     if (not isinstance(fields, list) or len(fields) > 64
             or any(not isinstance(ref, str) or ref not in field_refs for ref in fields)):

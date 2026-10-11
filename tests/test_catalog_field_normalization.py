@@ -1,8 +1,10 @@
-"""Pure catalog v2 field contract; no provider or native token execution."""
+"""Pure catalog v3 field contract; no provider or native token execution."""
 from copy import deepcopy
 import json
 
 import pytest
+
+from tests.catalog_selector import role_selections
 
 from logchat.rag.compact_bounds import compact_reservations
 from logchat.rag.sections import (
@@ -40,13 +42,13 @@ async def test_actual_shape_all_seven_choices_order_and_memberships_survive():
     _, args, options, payload, schema, records, select = await request()
     known = [f['field_ref'] for f in payload['field_catalog']]
     chosen = [known[i] for i in (6, 2, 5, 0, 4, 1, 3)]
-    original = {'phrase_refs': [payload['phrase_catalog'][0][0]] * 4,
+    original = {'selections': role_selections([payload['phrase_catalog'][0][0]] * 4),
                 'important_fields': (chosen * 5)[:33]}
     before = deepcopy(original)
     _validate_schema(original, schema)
     observations, fields = select(original)
     assert fields == chosen and len(fields) == 7 and original == before
-    assert observations == select({**original, 'phrase_refs': original['phrase_refs'][:1],
+    assert observations == select({**original, 'selections': original['selections'][:1],
                                    'important_fields': chosen})[0]
     assert observations[0]['event_refs'] == ['e0']
     legacy_payload, legacy_schema, _, _ = _compact_request(*args)
@@ -62,7 +64,7 @@ async def test_actual_shape_all_seven_choices_order_and_memberships_survive():
     assert repeated[:2] == (payload, schema)
     body = generation_body('pure-mock', CATALOG_COMPACT_INSTRUCTION, payload, schema)
     assert model_json(body) == model_json(generation_body('pure-mock', CATALOG_COMPACT_INSTRUCTION, *repeated[:2]))
-    assert payload['selector_protocol'] == SELECTOR_PROTOCOL == 'source-catalog-selector-v2'
+    assert payload['selector_protocol'] == SELECTOR_PROTOCOL == 'source-catalog-selector-v3'
     assert body['format'] == schema
     assert request_digest(body) == request_digest(generation_body(
         'pure-mock', CATALOG_COMPACT_INSTRUCTION, *repeated[:2]))
@@ -75,7 +77,7 @@ async def test_actual_shape_all_seven_choices_order_and_memberships_survive():
 async def test_incoming_64_and_original_output_reservations(count):
     _, _, _, payload, schema, records, select = await request(count)
     ref = max((f['field_ref'] for f in payload['field_catalog']), key=len)
-    response = {'phrase_refs': [payload['phrase_catalog'][0][0]] * 4, 'important_fields': [ref] * 64}
+    response = {'selections': role_selections([payload['phrase_catalog'][0][0]] * 4), 'important_fields': [ref] * 64}
     _validate_schema(response, schema)
     assert select(response)[1] == [ref]
     bounds = compact_reservations(payload, records, SummaryConfig())
@@ -92,7 +94,7 @@ async def test_incoming_64_and_original_output_reservations(count):
 @pytest.mark.parametrize('tail', ['unknown', 'F0', False, 1, None, [], {}])
 async def test_every_trailing_original_entry_rejects(tail):
     _, _, _, payload, schema, _, select = await request(1)
-    value = {'phrase_refs': [], 'important_fields': [payload['field_catalog'][0]['field_ref']] * 63 + [tail]}
+    value = {'selections': [], 'important_fields': [payload['field_catalog'][0]['field_ref']] * 63 + [tail]}
     with pytest.raises(ValueError):
         _validate_schema(value, schema)
     with pytest.raises(ValueError, match='invalid_source_observation_fields'):
@@ -103,7 +105,7 @@ async def test_every_trailing_original_entry_rejects(tail):
 @pytest.mark.parametrize('mutation', ['65', 'extra', 'not_list', 'phrase5', 'phrase_unknown'])
 async def test_original_caps_and_shape_reject_before_dedup(mutation):
     _, _, _, payload, schema, _, select = await request(1)
-    value = {'phrase_refs': [], 'important_fields': [payload['field_catalog'][0]['field_ref']] * 64}
+    value = {'selections': [], 'important_fields': [payload['field_catalog'][0]['field_ref']] * 64}
     if mutation == '65':
         value['important_fields'].append(value['important_fields'][0])
     elif mutation == 'extra':
@@ -111,9 +113,9 @@ async def test_original_caps_and_shape_reject_before_dedup(mutation):
     elif mutation == 'not_list':
         value['important_fields'] = 'f0'
     else:
-        value['phrase_refs'] = [payload['phrase_catalog'][0][0]] * (5 if mutation == 'phrase5' else 3)
+        value['selections'] = role_selections([payload['phrase_catalog'][0][0]] * (5 if mutation == 'phrase5' else 3))
         if mutation == 'phrase_unknown':
-            value['phrase_refs'].append('unknown')
+            value['selections'].extend(role_selections(['unknown']))
     with pytest.raises(ValueError):
         _validate_schema(value, schema)
     with pytest.raises(ValueError):
@@ -125,7 +127,7 @@ async def test_empty_field_catalog_accepts_only_empty_fields():
     _, _, _, payload, schema, _, select = await request(0)
     assert payload['field_catalog'] == []
     assert schema['properties']['important_fields']['maxItems'] == 0
-    value = {'phrase_refs': [], 'important_fields': []}
+    value = {'selections': [], 'important_fields': []}
     _validate_schema(value, schema)
     assert select(value) == ([], [])
     for fields in (['f0'], [False], ['f0'] * 64):
@@ -149,7 +151,7 @@ async def test_active_response_uses_sent_schema_and_required_union_is_not_trimme
             else:
                 selected = [r for r in refs if r not in payload['required_field_refs']]
                 selected += selected[:64 - len(selected)]
-            value = {'phrase_refs': [], 'important_fields': selected}
+            value = {'selections': [], 'important_fields': selected}
             return _validate_schema(value, schema)
     model = Fields([])
     if union_count == 65:

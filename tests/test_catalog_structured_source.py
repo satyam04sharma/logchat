@@ -78,7 +78,7 @@ async def test_actual_typed_values_offer_exact_content_and_preserve_complete_inp
         async def generate(self, instruction, payload, schema):
             self.calls += 1
             assert instruction == CATALOG_COMPACT_INSTRUCTION
-            assert set(schema['properties']) == {'phrase_refs', 'important_fields'}
+            assert set(schema['properties']) == {'selections', 'important_fields'}
             rows = records_for_chunk(source.chunks[0])
             expected, expected_schema, _, _ = _compact_request(
                 source.chunks[0], rows, SummaryConfig(), messages, **options)

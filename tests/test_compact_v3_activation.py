@@ -33,7 +33,7 @@ class Selector(SyntheticPhysicalPreflight):
     async def generate(self, instruction, payload, schema):
         self.calls.append((instruction, deepcopy(payload), deepcopy(schema)))
         from tests.catalog_selector import select_topics
-        assert set(schema['properties']) == {'phrase_refs', 'important_fields'}
+        assert set(schema['properties']) == {'selections', 'important_fields'}
         assert 'serialized' in instruction and '1600' in instruction
         return select_topics(payload, self.phrases, fields=self.fields, allow_absent_topics=True)
 

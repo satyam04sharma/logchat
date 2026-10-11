@@ -4,6 +4,8 @@ from itertools import combinations
 
 import pytest
 
+from tests.catalog_selector import role_selections
+
 from logchat.rag.compact_bounds import compact_reservations
 from logchat.rag.sections import (
     CATALOG_COMPACT_INSTRUCTION, COMPACT_EVIDENCE_V3, RENDER_VERSION,
@@ -41,11 +43,11 @@ async def test_catalog_request_preserves_complete_old_input_and_explicit_new_sch
     assert new['catalog_omissions'] == []
     assert new['phrase_catalog']
     assert len({p[1] for p in new['phrase_catalog']}) == len(new['phrase_catalog'])
-    assert set(schema['properties']) == set(schema['required']) == {'phrase_refs', 'important_fields'}
+    assert set(schema['properties']) == set(schema['required']) == {'selections', 'important_fields'}
     assert schema['additionalProperties'] is False
-    assert schema['properties']['phrase_refs']['maxItems'] == 4
-    assert schema['properties']['phrase_refs']['items']['enum'] == [p[0] for p in new['phrase_catalog']]
-    assert 'uniqueItems' not in schema['properties']['phrase_refs']
+    assert schema['properties']['selections']['maxItems'] == 4
+    assert schema['properties']['selections']['items']['properties']['phrase_ref']['enum'] == [p[0] for p in new['phrase_catalog']]
+    assert 'uniqueItems' not in schema['properties']['selections']
     assert 'source_phrases' in old_schema['properties']
     assert _compact_request(chunk, records, config, views) == (old, old_schema, old_metadata, old_fields)
     _compact_feasible(chunk, records, config, views, **options)
@@ -67,7 +69,7 @@ async def test_every_small_catalog_selection_and_redundant_response_fits_reserva
     choices = [list(choice) for n in range(min(4, len(refs)) + 1) for choice in combinations(refs, n)]
     choices.extend([[ref] * 4 for ref in refs])
     for choice in choices:
-        response = {'phrase_refs': choice, 'important_fields': []}
+        response = {'selections': role_selections(choice), 'important_fields': []}
         observations, fields = select_catalog_observations(response, records, local_views, bodies, [], catalog,
                                                           output_budget=8000)
         assert fields == []
@@ -199,7 +201,7 @@ async def test_full_required_optional_union_bounds_include_typed_utf8_and_escapi
         selected = mandatory + sorted(optional, key=cost, reverse=True)[:54]
         field_refs = [f['field_ref'] for f in selected]
         fields = [{k: f[k] for k in ('key', 'value', 'event_refs')} for f in selected]
-        response = {'phrase_refs': [phrase] * 4, 'important_fields': field_refs}
+        response = {'selections': role_selections([phrase] * 4), 'important_fields': field_refs}
         observations, returned = select_catalog_observations(response, records,
             {row['ref']: views[row['event_key']] for row in records},
             {row['ref']: options['protected_bodies'][row['event_key']] for row in records},

@@ -4,6 +4,8 @@ from itertools import combinations
 
 import pytest
 
+from tests.catalog_selector import role_selections
+
 from logchat.rag.source_catalog import (
     build_source_catalog, select_catalog_observations,
 )
@@ -23,7 +25,7 @@ def source(messages, extra=None):
 
 
 def select(data, refs, **changes):
-    value = {'phrase_refs': refs, 'important_fields': []}
+    value = {'selections': role_selections(refs), 'important_fields': []}
     value.update(changes)
     records, views, bodies, catalog = data
     return select_catalog_observations(value, records, views, bodies, ['f0'], catalog,
@@ -126,7 +128,7 @@ def test_exact_duplicate_refs_normalize_only_after_full_validation():
 
 def test_transport_budget_counts_actual_ref_response():
     records, views, bodies, catalog = source(['operation completed after delay'])
-    value = {'phrase_refs': [catalog.phrases[0].phrase_ref], 'important_fields': []}
+    value = {'selections': role_selections([catalog.phrases[0].phrase_ref]), 'important_fields': []}
     budget = len(_json(value))
     select_catalog_observations(value, records, views, bodies, [], catalog, output_budget=budget)
     with pytest.raises(ValueError, match='invalid_source_catalog_output'):

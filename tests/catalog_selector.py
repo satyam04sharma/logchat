@@ -19,5 +19,12 @@ def select_topics(payload, topics, *, fields=False, allow_absent_topics=False):
         assert candidates, 'Required topic unavailable in supplied catalog'
         ref, _ = min(candidates, key=lambda item: (len(item[1]), item[0]))
         selected.append(ref)
-    return {'phrase_refs': selected,
+    return {'selections': role_selections(selected),
             'important_fields': [f['field_ref'] for f in payload['field_catalog']] if fields else []}
+
+
+def role_selections(refs):
+    """Translate identical mock choices; no selection/ranking change."""
+    if not isinstance(refs, list):
+        return refs
+    return [{'phrase_ref': ref, 'roles': ['context']} for ref in refs]
