@@ -31,6 +31,7 @@ Current release status: **not ready to publish as a validated 100K demo**. The l
 | Auth compaction exceeds the intake deadline after exact packing | Fresh cycle: 27 physical requests, 15 completed, request 16 canceled at 300 seconds; lossless input-factoring correction delegated |
 | Failed-run checker aborts while reconciling a canceled document response | New private checker candidate preserves strict failures and distinguishes returned/canceled/unattempted requests; independent review pending |
 | Server shutdown leaves diagnostic ledgers unsealed | New private checker candidate seals before Uvicorn forwards SIGTERM; independent review pending |
+| Published incident quotes omit the operational subject | Original failed cycle web publication retains timeout outcome but lacks the operation quote; catalog-versus-selection diagnosis pending |
 | Full 100K indexing and context acceptance | Outstanding; admission alone is insufficient |
 
 The sections below preserve the failed cycles and exact diagnoses; earlier intermediate candidates are not release results.
@@ -501,3 +502,8 @@ GNHF implemented a versioned request-local dictionary that replaces repeated mes
 The root-owned default-counter measurement uses saved grouping responses and sends zero generation, embedding or intake requests. Actual complete-input plans contain 19 web requests (69,054 tokens), 16 worker requests (65,945 tokens), and 15 auth requests (89,948 tokens; maximum 6,722). Auth previously required 27 requests and 125,332 tokens. All requests fit within the unchanged 8,192-token context, including the reserved 1,200 output tokens. Nine metadata requests and 50 vocabulary count calls are recorded. Three owned workers exit successfully and their staging directories are removed. These measurements establish token fit and conservation, not generation latency, selected context quality or 100K completion.
 
 The first measurement probe incorrectly used the generation proof's fit method as a property and stopped after three metadata responses and one count, with zero generation/embedding/intake calls. That failed probe is preserved. A separate corrected namespace passes. The full suite also exposed a stale test assertion reading inline messages; the test now expands the dictionary and checks exact ordered member/measurement equality. The new private checker retains all 32 strict gates in failed reports and passes independent scope/counter/signal controls; activation still requires a newly bound source contract and root freeze.
+
+
+## Operational context missing from published incident quotes
+
+A pure, read-only check of the original failed fresh cycle's 23 published web chunks finds one incident member with source quotes. Those quotes retain the timeout outcome but omit the operational subject required for useful incident context. No new query, generation or source-membership re-audit occurred in this partial check; the original cycle remains failed. Exact source catalogs and saved model selections need comparison to distinguish a missing eligible proposal from a model-selection omission. The reviewed message dictionary conserves choices and does not itself establish that the selector preserves useful operational context. The new checker activation remains blocked while this distinct quality finding is diagnosed and corrected.
