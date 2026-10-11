@@ -109,8 +109,27 @@ class RetrieverTests(unittest.IsolatedAsyncioTestCase):
                 detail = json.loads(next(p.detail for p in result.provenance if p.stage == "retrieval_cell"))
                 self.assertEqual(detail["gate_rejected"], 1)
 
+    def test_question_identifier_parser_retains_atomic_contacts_and_paths(self):
+        from logchat.rag.retriever import _requested_identifiers
+        cases = {
+            "Inspect person_42@example.com": ("person_42@example.com",),
+            "Inspect absent@example.com": ("absent@example.com",),
+            "Inspect +1-202-555-0102": ("+1-202-555-0102",),
+            "Inspect +44 7700 900222": ("+44 7700 900222",),
+            "Inspect person@example.com": ("person@example.com",),
+            "Inspect BRANCH.blue/73": (),
+            "Inspect branch_42/child": ("branch_42/child",),
+            "What does email capture retain?": (),
+            "Why did HTTP-500 responses increase in v1.2?": (),
+            "Why did errors rise after v1.2.0-beta?": (),
+            "Compare alice@example.test and bob@example.test checkout errors.": (),
+        }
+        for question, expected in cases.items():
+            with self.subTest(question=question):
+                self.assertEqual(_requested_identifiers(question), expected)
+
     async def test_uppercase_topics_remain_semantic_and_identifier_case_is_exact(self):
-        for topic in ("HTTP", "SDK", "RAG", "Why did HTTP 500 requests spike?"):
+        for topic in ("HTTP", "SDK", "RAG", "HTTP-500", "v1.2", "v1", "Why did HTTP 500 requests spike?", "Compare v1.2 and v2.0", "Why did errors rise after v1.2.0-beta?", "Why did HTTP-500 errors spike?"):
             with self.subTest(topic=topic):
                 result = await retrieve(topic, (CELL,), Backend(), Provider())
                 self.assertEqual(len(result.candidates), 1)

@@ -96,6 +96,49 @@ class RemapperTests(unittest.IsolatedAsyncioTestCase):
         rejected = await remap(source, Model({"selections": []}))
         self.assertFalse(rejected.selected)
 
+    async def test_complete_email_and_phone_constraints_never_split_into_identifier_fragments(self):
+        from logchat.rag.builder import event_key
+        from logchat.rag.sections import encode_records, record_metrics
+        values = {"email": "person_42@example.com", "normal_email": "person@example.com",
+                  "phone": "+1-202-555-0102", "intl_phone": "+44 7700 900222"}
+        row = {"event_key": event_key(IDENTITY, "event-a"), "event_id": "event-a",
+               "timestamp": START.isoformat(), "source": "browser", "service": "web", "level": "error",
+               "release": None, "fingerprint": "session-rejected", "message": "Session rejected\nStructured fields: " + json.dumps(values),
+               "duration_ms": None, "request_status": None}
+        original = candidate("contact")
+        item = replace(original, chunk=replace(original.chunk, summary=encode_records((row,)),
+                       metrics=record_metrics((row,)), first_event_at=START, last_event_at=START,
+                       compression_version="local-model-section-v1"))
+        config = RemapConfig(input_byte_budget=48000)
+        for question in ("Inspect person_42@example.com", "person_42@example.com",
+                         "Inspect person@example.com", "Inspect +44 7700 900222",
+                         "Inspect +1-202-555-0102", "Inspect person_42@example.com and +1-202-555-0102"):
+            with self.subTest(question=question):
+                model = Model()
+                checked = await remap(retrieval((item,), question=question), model,
+                                     preserve_content=True, config=config)
+                self.assertEqual(len(checked.selected), 1)
+                self.assertEqual(len(model.calls), 1)
+        for question in ("Inspect person_43@example.com", "Inspect absent@example.com",
+                         "Inspect +44 7700 900223", "Inspect +1-202-555-0103",
+                         "Inspect person_42@example.com and absent@example.com"):
+            with self.subTest(question=question):
+                model = Model()
+                checked = await remap(retrieval((item,), question=question), model,
+                                     preserve_content=True, config=config)
+                self.assertFalse(checked.selected)
+                self.assertFalse(model.calls)
+
+    async def test_versions_http_status_and_contact_topics_reach_model_relevance(self):
+        for question in ("Why did errors rise after v1.2.0-beta?", "Why did HTTP-500 increase?",
+                         "What does email capture retain?", "How are phone numbers captured?"):
+            with self.subTest(question=question):
+                model = Model()
+                checked = await remap(retrieval(question=question), model)
+                self.assertEqual(len(model.calls), 1)
+                self.assertEqual(len(checked.selected), 1)
+                self.assertEqual(json.loads(checked.provenance[0].detail)["literal_anchor_values"], 0)
+
     async def test_known_and_missing_constraints_cooccur_in_retained_records(self):
         from logchat.rag.sections import encode_records, record_metrics
         from logchat.rag.builder import event_key

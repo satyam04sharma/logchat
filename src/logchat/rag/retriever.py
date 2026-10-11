@@ -227,20 +227,40 @@ def _hits(cell, values, method, limit, *, preserve_content=False):
 
 
 def _requested_identifiers(question):
-    """Infer exact intent conservatively, independently of retrieved values.
+    """Infer exact intent from complete values, independently of candidates.
 
-    Punctuated IDs with letters and digits are exact requests even in prose.
-    A standalone mixed-case code is also exact. Plain uppercase topics (HTTP,
-    SDK, RAG), prose words, counts and version mentions in prose stay semantic.
-    Matching stays case-sensitive and bounded by complete source tokens.
+    Email/phone values stay atomic: fragments inside an address or path never
+    become additional AND constraints. Punctuated letter+digit IDs and standalone
+    mixed-case/alphanumeric codes are exact. Uppercase topics, versions and HTTP
+    status codes remain semantic. Source matching is case-sensitive.
     """
     stripped = question.strip().rstrip("?!.")
-    return tuple(dict.fromkeys(token for token in (raw.rstrip(".") for raw in _TOKEN.findall(question))
-        if not token.startswith("REDACTED_") and (
-            (any(c.isalpha() for c in token) and any(c.isdigit() for c in token)
-             and ("_" in token or "-" in token))
-            or (token == stripped and (re.search(r"[a-z][A-Z]", token)
-                or (any(c.isalpha() for c in token) and any(c.isdigit() for c in token)))))))
+    requested = []
+    # Include the full address/path alphabet rather than splitting at @ or /.
+    # Question length is already bounded at the public entry points.
+    for match in re.finditer(r"\+\d(?:[\d -]*\d)?|[A-Za-z0-9+][\w.@:/+\-]*", question):
+        token = match.group().rstrip(".")
+        if token.startswith("REDACTED_") or re.fullmatch(
+                r"(?:v\d+(?:\.\d+)*(?:[-+][\w.-]+)?|\d+(?:\.\d+)+(?:[-+][\w.-]+)?|HTTP[-_]\d{3})", token, re.IGNORECASE):
+            continue
+        email = re.fullmatch(r"[\w.+\-]+@[\w.\-]+\.[A-Za-z]{2,}", token)
+        phone = (re.fullmatch(r"\+?[\d -]+", token) and
+                 sum(c.isdigit() for c in token) >= 7 and (token.startswith("+") or "-" in token))
+        punctuated_id = (any(c.isalpha() for c in token) and any(c.isdigit() for c in token)
+                         and ("_" in token or "-" in token))
+        standalone_code = (token == stripped and (re.search(r"[a-z][A-Z]", token)
+                           or (any(c.isalpha() for c in token) and any(c.isdigit() for c in token))))
+        if email or phone:
+            # Contacts in explicit lookup intent are literal constraints. A
+            # comparison can ask for alternatives rather than an impossible
+            # same-record AND; retained-field anchors handle known alternatives.
+            contact_lookup = (token == stripped or (not re.search(r"\bcompar(?:e|ing|ison)\b", question, re.IGNORECASE)
+                and re.search(r"\b(?:inspect|investigate|find|lookup|show|email|phone|for|about|with|to)\b|look up", question, re.IGNORECASE)))
+            if contact_lookup:
+                requested.append(token)
+        elif punctuated_id or standalone_code:
+            requested.append(token)
+    return tuple(dict.fromkeys(requested))
 
 
 def _identifier_in_record(identifier, record):
