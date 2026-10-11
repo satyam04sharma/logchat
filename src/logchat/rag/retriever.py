@@ -24,7 +24,7 @@ from logchat.rag.contracts import (
 )
 from pipeline.redaction import redact_text
 
-IMPLEMENTATION = "scoped-hybrid-rrf-v4"
+IMPLEMENTATION = "scoped-hybrid-rrf-v6"
 _TOKEN = re.compile(r"[A-Za-z0-9][\w.-]{1,79}")
 
 
@@ -274,6 +274,138 @@ def _identifier_in_record(identifier, record):
                _scalars({key: value for key, value in record.items() if key != "event_key"}))
 
 
+def _readable_records(candidate):
+    """Decode final local sections; omit the derived replay hash, not source data."""
+    from logchat.rag.sections import RECORD_PREFIX, SECTION_VERSION, SUMMARY_VERSION, COMPACT_VERSION, records_for_chunk
+    chunk = candidate.chunk
+    if chunk.compression_version not in {SECTION_VERSION, SUMMARY_VERSION, COMPACT_VERSION}:
+        return None
+    if chunk.compression_version == SECTION_VERSION and not chunk.summary.startswith(RECORD_PREFIX):
+        return None
+    return tuple({key: value for key, value in row.items() if key != "event_key"}
+                 for row in records_for_chunk(chunk))
+
+
+def _literal_candidate_scope(question, cells, by_cell, *, preserve_content=True):
+    """Pure field/record eligibility shared before every candidate cap.
+
+    Derive anchors from the complete scoped candidate pool. Alternatives in one
+    original field are OR; different fields must co-occur in one source record.
+    """
+    if not preserve_content:
+        requested = _requested_identifiers(question)
+        anchors = {("requested_identifier", value): {value} for value in requested}
+        excluded = tuple((candidate.cell_id, candidate.chunk.chunk_id)
+                         for options in by_cell.values() for candidate in options
+                         if not all(_literal_in_question(value, candidate.chunk.summary) for value in requested))
+        filtered = {cell: [candidate for candidate in options
+                          if (candidate.cell_id, candidate.chunk.chunk_id) not in excluded]
+                    for cell, options in by_cell.items()}
+        return filtered, {}, {}, anchors, excluded
+    records, fields, anchors = {}, {}, {}
+    for cell in cells:
+        for candidate in by_cell[cell.cell_id]:
+            key = candidate.cell_id, candidate.chunk.chunk_id
+            decoded = _readable_records(candidate)
+            if decoded is None:
+                continue
+            records[key] = decoded
+            fields[key] = tuple(_record_values(row) for row in decoded)
+            for row in fields[key]:
+                for path, values in row.items():
+                    for value in values:
+                        if _literal_in_question(value, question):
+                            anchors.setdefault(path, set()).add(value)
+    # Existing field anchors preserve same-field comparison alternatives. A
+    # question-derived ID already represented by an anchor needs no additional
+    # AND constraint; wholly unknown IDs must never disappear from eligibility.
+    anchored_values = {value for values in anchors.values() for value in values}
+    requested = tuple(value for value in _requested_identifiers(question)
+                      if not any(_literal_in_question(value, anchor) for anchor in anchored_values))
+    for value in requested:
+        anchors[("requested_identifier", value)] = {value}
+    if not anchors:
+        return by_cell, records, {}, {}, ()
+    matched, filtered, exclusions = {}, {}, []
+    for cell in cells:
+        kept = []
+        for candidate in by_cell[cell.cell_id]:
+            key = candidate.cell_id, candidate.chunk.chunk_id
+            # Alternatives in the same field support comparisons; different
+            # fields must co-occur in one record, never across unrelated people.
+            indices = tuple(index for index, row in enumerate(fields.get(key, ()))
+                            if all((all(_identifier_in_record(value, records[key][index]) for value in values)
+                                    if path[0] == "requested_identifier" else row.get(path, set()) & values)
+                                   for path, values in anchors.items()))
+            if indices:
+                kept.append(candidate)
+                matched[key] = indices
+            else:
+                exclusions.append(key)
+        filtered[cell.cell_id] = kept
+    return filtered, records, matched, anchors, tuple(exclusions)
+
+
+def _fair_candidates(candidates, preferred_services=()):
+    """Fair services, then sources within services; no relevance promotion."""
+    services = {}
+    for candidate in candidates:
+        sources = services.setdefault(candidate.chunk.service, {})
+        sources.setdefault(candidate.chunk.identity.source_id, []).append(candidate)
+
+    def interleave(groups):
+        return tuple(rows[index] for index in range(max((len(rows) for rows in groups), default=0))
+                     for rows in groups if index < len(rows))
+
+    order = [service for service in services if service in preferred_services]
+    order.extend(service for service in services if service not in preferred_services)
+    return interleave([interleave(list(services[service].values())) for service in order])
+
+
+def _requested_services(question, candidates):
+    """Only explicit whole known labels imply multi-service answer breadth."""
+    services = tuple(dict.fromkeys(candidate.chunk.service for candidate in candidates
+                     if _literal_in_question(candidate.chunk.service.casefold(), question.casefold())))
+    return services if len(services) > 1 else ()
+
+
+def _literal_witness_admission(candidates, records, matched, anchors, services=()):
+    """Reserve actual alternative/service witnesses, then fair repetitions.
+
+    This is deterministic candidate admission, never model-selected evidence.
+    A candidate becomes a witness only from its eligible original record values.
+    """
+    alternatives = {path: values for path, values in anchors.items()
+                    if len(values) > 1 and path[0] != "requested_identifier"}
+    seen_values, seen_services, witnesses, repetitions = set(), set(), [], []
+    for candidate in _fair_candidates(candidates, services):
+        key = candidate.cell_id, candidate.chunk.chunk_id
+        values = set()
+        if alternatives:
+            for index in matched.get(key, ()):
+                fields = _record_values(records[key][index])
+                values.update((path, value) for path, requested in alternatives.items()
+                              for value in fields.get(path, set()) & requested)
+        service = candidate.chunk.service
+        if values - seen_values or (service in services and service not in seen_services):
+            witnesses.append(candidate)
+            seen_values.update(values)
+            seen_services.add(service)
+        else:
+            repetitions.append(candidate)
+    return (*witnesses, *repetitions), len(witnesses)
+
+
+def _cap_candidates(question, cell, candidates, scoped, records, matched, anchors, config):
+    services = _requested_services(question, candidates)
+    eligible_keys = {candidate.chunk.chunk_id for candidate in scoped[cell.cell_id]}
+    eligible = [candidate for candidate in candidates if candidate.chunk.chunk_id in eligible_keys]
+    neighbors = [candidate for candidate in candidates if candidate.chunk.chunk_id not in eligible_keys]
+    eligible, witnesses = _literal_witness_admission(eligible, records, matched, anchors, services)
+    ordered = (*eligible, *_fair_candidates(neighbors, services))
+    return tuple(ordered[:config.candidate_limit]), len(ordered) > config.candidate_limit, witnesses > config.candidate_limit
+
+
 def _identifiers(question):
     return {token.casefold() for token in _TOKEN.findall(question)
             if not token.startswith("REDACTED_") and ("_" in token
@@ -281,7 +413,7 @@ def _identifiers(question):
             or (token.isupper() and len(token) >= 3) or re.search(r"[a-z][A-Z]", token))}
 
 
-def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content=False):
+def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content=False, uncapped=False):
     from logchat.rag.sections import SUMMARY_VERSION, COMPACT_VERSION, records_for_chunk
     chunks, vectors, lexical = {}, {}, {}
     for hits, target in ((vector_hits, vectors), (lexical_hits, lexical)):
@@ -324,7 +456,12 @@ def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content
                                     vector_rank=vector.rank if vector else None,
                                     lexical_rank=lex.rank if lex else None))
     candidates.sort(key=lambda c: (-c.score, -(c.vector_score if c.vector_score is not None else -1), c.chunk.chunk_id))
-    return tuple(candidates[:config.candidate_limit]), rejected, len(candidates) > config.candidate_limit
+    if uncapped:
+        return tuple(candidates), rejected, False
+    scoped, records, matched, anchors, _ = _literal_candidate_scope(
+        question, (cell,), {cell.cell_id: candidates}, preserve_content=preserve_content)
+    candidates, capped, _ = _cap_candidates(question, cell, candidates, scoped, records, matched, anchors, config)
+    return candidates, rejected, capped
 
 
 def _complete(window, rows):
@@ -435,21 +572,42 @@ async def retrieve(question: str, cells: Sequence[RetrievalCell], backend: Searc
     provenance.append(StageProvenance("query_embedding", "ok", IMPLEMENTATION,
                                       model=spec.model, revision=spec.revision,
                                       detail="compatible_query_embedding"))
-    candidates = []
+    pools = {}
     for cell in cells:
         try:
             vectors = _hits(cell, backend.vector_search(cell, vector, limit=config.vector_limit),
                             "vector", config.vector_limit, preserve_content=preserve_content)
             lexical = _hits(cell, backend.lexical_search(cell, question, limit=config.lexical_limit),
                             "lexical", config.lexical_limit, preserve_content=preserve_content)
-            selected, rejected, capped = _rank(cell, vectors, lexical, question, config, preserve_content=preserve_content)
+            ranked, rejected, _ = _rank(cell, vectors, lexical, question, config,
+                                        preserve_content=preserve_content, uncapped=True)
+            if preserve_content:
+                # Keep malformed retained sections local to the failing cell,
+                # before deriving shared anchors across other valid cells.
+                for candidate in ranked:
+                    _readable_records(candidate)
+            pools[cell.cell_id] = (ranked, vectors, lexical, rejected)
         except Exception:
             gaps.append(f"{cell.cell_id}:candidate_search_unavailable_or_invalid")
             provenance.append(StageProvenance("retrieval_cell", "failed", IMPLEMENTATION,
                                               detail=json.dumps({"cell_id": cell.cell_id,
                                                   "reason": "candidate_search_unavailable_or_invalid"})))
             continue
+    scoped, records, matched, anchors, _ = _literal_candidate_scope(
+        question, cells, {cell.cell_id: pools.get(cell.cell_id, ((),))[0] for cell in cells},
+        preserve_content=preserve_content)
+    candidates = []
+    for cell in cells:
+        if cell.cell_id not in pools:
+            continue
+        ranked, vectors, lexical, rejected = pools[cell.cell_id]
+        selected, capped, witnesses_capped = _cap_candidates(
+            question, cell, ranked, scoped, records, matched, anchors, config)
         candidates.extend(selected)
+        if capped:
+            gaps.append(f"{cell.cell_id}:retrieval_candidate_limit_reached")
+        if witnesses_capped:
+            gaps.append(f"{cell.cell_id}:literal_or_service_witnesses_exceed_candidate_limit")
         if not selected:
             gaps.append(f"{cell.cell_id}:no_relevant_candidates")
         if any(c.chunk.window.start < cell.window.start or c.chunk.window.end > cell.window.end for c in selected):
@@ -457,9 +615,12 @@ async def retrieve(question: str, cells: Sequence[RetrievalCell], backend: Searc
         detail = {"cell_id": cell.cell_id, "vector_returned": len(vectors),
                   "lexical_returned": len(lexical), "gate_rejected": rejected,
                   "candidates": len(selected), "candidate_cap_reached": capped,
+                  "literal_nonmatching_candidates": len(ranked) - len(scoped[cell.cell_id]),
+                  "literal_or_service_witness_cap_reached": witnesses_capped,
                   "coverage_rows": coverage_counts[cell.cell_id][0],
                   "coverage_cap_reached": coverage_counts[cell.cell_id][1],
                   "score_meaning": "reciprocal_rank_fusion_not_confidence",
+                  "candidate_admission": "shared_literal_eligibility_and_witnesses_then_service_source_round_robin",
                   "similarity_floor": config.min_vector_similarity,
                   "content_policy": "preserved_local_sections" if preserve_content else "redacted_templates",
                   "revalidation_required": True}

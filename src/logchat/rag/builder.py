@@ -184,6 +184,13 @@ async def embed_batch(batch, provider):
     summary_models = {chunk.summary_model for chunk in batch.chunks if chunk.summary_model is not None}
     summarized = bool(summary_models)
     compact = implementation == "local-model-compact-v1"
+    embedding_detail = ("compact_summary_selected_fields_exact_metrics" if compact else
+                        "compact_summary_and_exact_metrics_full_records_separate" if summarized else "complete_bounded_inputs")
+    from logchat.rag.sections import COMPACT_VERSION, validate_compact_chunk
+    transports = sorted({validate_compact_chunk(chunk)["version"] for chunk in batch.chunks
+                         if chunk.compression_version == COMPACT_VERSION})
+    if transports:
+        embedding_detail += ";document_transports=" + ",".join(transports)
     compression_models = summary_models if summarized else section_models
     provenance = [
         StageProvenance("compression", "ok" if batch.chunks else "empty", implementation,
@@ -193,8 +200,7 @@ async def embed_batch(batch, provider):
                             ("exact_local_records_model_partition_only" if implementation.startswith("local-") else "deterministic_generalized_templates_exact_metrics")),
         StageProvenance("embedding", "ok" if batch.chunks else "empty", spec.provider,
                         model=spec.model, revision=spec.revision,
-                        detail="compact_summary_selected_fields_exact_metrics" if compact else
-                            "compact_summary_and_exact_metrics_full_records_separate" if summarized else "complete_bounded_inputs"),
+                        detail=embedding_detail),
     ]
     if summarized:
         provenance.append(StageProvenance("summary", "ok", implementation if compact else "local-model-summary-v1",

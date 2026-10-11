@@ -518,6 +518,10 @@ class NativeRAGRuntime:
                                 failure_category = "legacy_raw_work_requires_explicit_migration"
                                 raise ValueError(failure_category)
                             validate_compact_batch(job.batch)
+                            recovered = self.scheduler.recover_projection(job)
+                            if recovered is None:
+                                continue
+                            job = recovered
                         failure_category = "embedding_unavailable"
                         built = await embed_batch(job.batch, self.provider)
                         self.scheduler.complete(job, built, writer=self.backend.write_result)
@@ -525,13 +529,15 @@ class NativeRAGRuntime:
                         raise
                     except Exception as error:
                         category = getattr(error,"category",None)
-                        if category in {"section_timeout","section_provider_unavailable","section_invalid_partition",
+                        if category in {"embedding_input_context_exceeded",
+                                        "section_timeout","section_provider_unavailable","section_invalid_partition",
                                         "section_invalid_model_output","section_output_budget_exceeded",
                                         "summary_timeout","summary_provider_unavailable","summary_invalid_model_output","summary_invalid_output","summary_input_budget_exceeded",
                                         "summary_local_model_required","summary_model_identity_required",
                                         "summary_output_budget_exceeded","summary_ungrounded_observation"}:
                             failure_category = category
-                        self.scheduler.fail(job, failure_category)
+                        self.scheduler.fail(job, failure_category,
+                                            retryable=failure_category != "embedding_input_context_exceeded")
                         self.provider = None
                         self.state, self.error = "unavailable", failure_category
                     finally:

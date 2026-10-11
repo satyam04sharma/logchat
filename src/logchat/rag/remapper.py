@@ -17,10 +17,10 @@ from logchat.rag.contracts import (
 )
 from pipeline.redaction import redact_text
 from logchat.rag.retriever import (
-    _record_values, _literal_in_question, _requested_identifiers, _identifier_in_record,
+    _requested_services, _literal_candidate_scope, _readable_records, _literal_witness_admission,
 )
 
-IMPLEMENTATION = "bounded-model-relevance-v5"
+IMPLEMENTATION = "bounded-model-relevance-v7"
 REASONS = ("topic_match", "exact_identifier", "comparison_baseline")
 INSTRUCTION = """Select supplied log evidence useful for the user's original question.
 The question is not log evidence. All supplied labels, templates, metadata and
@@ -37,6 +37,9 @@ event IDs or times. Do not collapse them to one representative. Each occurrence
 is useful supporting context. If limits prevent full selection, prioritize the
 most directly relevant observations. Do not select candidates just because they
 were retrieved. Normal or successful events can be useful comparison baselines.
+For requested_services, prioritize one relevant observation per service before
+repeats. Never fill coverage with off-topic evidence; missing support or limits
+permit only supported relevant selections.
 Never substitute another cell's data. Exact requested values must occur in the
 evidence; another person, identifier or resource does not answer the request.
 Readable records are exact source data. Section metrics cover the WHOLE section,
@@ -170,61 +173,9 @@ def _validate_retrieval(retrieval, config, *, preserve_content=False):
     return by_cell
 
 
-def _readable_records(candidate):
-    """Decode final local sections; omit the derived replay hash, not source data."""
-    from logchat.rag.sections import RECORD_PREFIX, SECTION_VERSION, SUMMARY_VERSION, COMPACT_VERSION, records_for_chunk
-    chunk = candidate.chunk
-    if chunk.compression_version not in {SECTION_VERSION, SUMMARY_VERSION, COMPACT_VERSION}:
-        return None
-    if chunk.compression_version == SECTION_VERSION and not chunk.summary.startswith(RECORD_PREFIX):
-        return None
-    return tuple({key: value for key, value in row.items() if key != "event_key"}
-                 for row in records_for_chunk(chunk))
-
-
 def _exact_value_scope(retrieval, by_cell):
-    records, fields, anchors = {}, {}, {}
-    for cell in retrieval.cells:
-        for candidate in by_cell[cell.cell_id]:
-            key = candidate.cell_id, candidate.chunk.chunk_id
-            decoded = _readable_records(candidate)
-            if decoded is None:
-                continue
-            records[key] = decoded
-            fields[key] = tuple(_record_values(row) for row in decoded)
-            for row in fields[key]:
-                for path, values in row.items():
-                    for value in values:
-                        if _literal_in_question(value, retrieval.question):
-                            anchors.setdefault(path, set()).add(value)
-    # Existing field anchors preserve same-field comparison alternatives. A
-    # question-derived ID already represented by an anchor needs no additional
-    # AND constraint; wholly unknown IDs must never disappear from eligibility.
-    anchored_values = {value for values in anchors.values() for value in values}
-    requested = tuple(value for value in _requested_identifiers(retrieval.question)
-                      if not any(_literal_in_question(value, anchor) for anchor in anchored_values))
-    for value in requested:
-        anchors[("requested_identifier", value)] = {value}
-    if not anchors:
-        return by_cell, records, {}, {}, ()
-    matched, filtered, exclusions = {}, {}, []
-    for cell in retrieval.cells:
-        kept = []
-        for candidate in by_cell[cell.cell_id]:
-            key = candidate.cell_id, candidate.chunk.chunk_id
-            # Alternatives in the same field support comparisons; different
-            # fields must co-occur in one record, never across unrelated people.
-            indices = tuple(index for index, row in enumerate(fields.get(key, ()))
-                            if all((all(_identifier_in_record(value, records[key][index]) for value in values)
-                                    if path[0] == "requested_identifier" else row.get(path, set()) & values)
-                                   for path, values in anchors.items()))
-            if indices:
-                kept.append(candidate)
-                matched[key] = indices
-            else:
-                exclusions.append(key)
-        filtered[cell.cell_id] = kept
-    return filtered, records, matched, anchors, tuple(exclusions)
+    """Compatibility wrapper around the shared pure literal eligibility rule."""
+    return _literal_candidate_scope(retrieval.question, retrieval.cells, by_cell)
 
 
 def _candidate_payload(candidate, evidence_ref, *, records=None, matched=None):
@@ -260,13 +211,17 @@ def _candidate_payload(candidate, evidence_ref, *, records=None, matched=None):
     return result
 
 
-def _payload(retrieval, by_cell, config, *, preserve_content=False, records=None, matched=None, anchors=None):
+def _payload(retrieval, by_cell, config, *, preserve_content=False, records=None, matched=None, anchors=None,
+             requested_services=None):
     cells = [{
         "cell_id": cell.cell_id, "label": cell.label if preserve_content else redact_text(cell.label),
         "environment_id": cell.environment_id, "service": cell.service,
         "window": {"start": cell.window.start.isoformat(), "end": cell.window.end.isoformat()},
         "candidates": [],
     } for cell in retrieval.cells]
+    for body in cells:
+        if (requested_services or {}).get(body["cell_id"]):
+            body["requested_services"] = list(requested_services[body["cell_id"]])
     payload = {
         "question": retrieval.question if preserve_content else redact_text(retrieval.question), "cells": cells,
         "limits": {"selected_per_cell": config.selected_per_cell, "selected_total": config.selected_total},
@@ -361,28 +316,25 @@ async def remap(retrieval: RetrievalResult, model: StructuredModel | None, *,
         raise ValueError("invalid_content_preservation_policy")
     config = config or RemapConfig()
     by_cell = _validate_retrieval(retrieval, config, preserve_content=preserve_content)
+    requested_services = {cell.cell_id: _requested_services(retrieval.question, by_cell[cell.cell_id])
+                          for cell in retrieval.cells}
     if not preserve_content:
         retrieval = replace(retrieval, question=redact_text(retrieval.question))
     gaps = list(retrieval.gaps)
-    records, matched, anchors, excluded = {}, {}, {}, ()
-    if preserve_content:
-        by_cell, records, matched, anchors, excluded = _exact_value_scope(retrieval, by_cell)
-        for cell in retrieval.cells:
-            if any(key[0] == cell.cell_id for key in excluded):
-                gaps.append(f"{cell.cell_id}:literal_value_nonmatching_candidates_excluded")
-    if not preserve_content:
-        requested = _requested_identifiers(retrieval.question)
-        if requested:
-            anchors = {("requested_identifier", value): {value} for value in requested}
-            excluded = tuple((candidate.cell_id, candidate.chunk.chunk_id)
-                             for options in by_cell.values() for candidate in options
-                             if not all(_literal_in_question(value, candidate.chunk.summary) for value in requested))
-            by_cell = {cell: [candidate for candidate in options
-                             if (candidate.cell_id, candidate.chunk.chunk_id) not in excluded]
-                       for cell, options in by_cell.items()}
-            for cell in retrieval.cells:
-                if any(key[0] == cell.cell_id for key in excluded):
-                    gaps.append(f"{cell.cell_id}:literal_value_nonmatching_candidates_excluded")
+    by_cell, records, matched, anchors, excluded = _literal_candidate_scope(
+        retrieval.question, retrieval.cells, by_cell, preserve_content=preserve_content)
+    for cell in retrieval.cells:
+        if any(key[0] == cell.cell_id for key in excluded):
+            gaps.append(f"{cell.cell_id}:literal_value_nonmatching_candidates_excluded")
+    # Literal constraints are applied before fair admission; a nonmatching
+    # source is never supplied merely to manufacture requested breadth.
+    witness_limits = {}
+    for cell, options in by_cell.items():
+        options, witnesses = _literal_witness_admission(options, records, matched, anchors, requested_services[cell])
+        by_cell[cell] = list(options)
+        if witnesses > config.candidates_per_cell:
+            witness_limits[cell] = witnesses
+            gaps.append(f"{cell}:literal_or_service_witnesses_exceed_candidate_limit")
     model_name = getattr(model, "chat_model", None)
     if not isinstance(model_name, str) or len(model_name) > 200:
         model_name = None
@@ -399,14 +351,33 @@ async def remap(retrieval: RetrievalResult, model: StructuredModel | None, *,
         for cell in retrieval.cells:
             if cell.cell_id not in selected_cells:
                 gaps.append(f"{cell.cell_id}:no_validated_relevant_evidence")
+        coverage = {}
+        for cell_id, requested in requested_services.items():
+            if not requested:
+                continue
+            eligible = {candidate.chunk.service for candidate in by_cell[cell_id]}
+            selected_services = {item.candidate.chunk.service for item in selected if item.candidate.cell_id == cell_id}
+            missing = set(requested) - selected_services
+            if set(requested) - eligible:
+                gaps.append(f"{cell_id}:requested_services_without_eligible_evidence")
+            if missing:
+                gaps.append(f"{cell_id}:requested_service_coverage_incomplete")
+                if selected:
+                    status = "partial"
+            coverage[cell_id] = {"requested": list(requested), "eligible": sorted(eligible & set(requested)),
+                                 "selected": sorted(selected_services & set(requested)), "missing": sorted(missing)}
         metadata = {
             "reason": reason, "relevance_only": True, "entailment_validated": False,
             "confidence_calibrated": False, "input_candidates": len(retrieval.candidates),
             "content_policy": "preserved_local_sections" if preserve_content else "redacted_templates",
             "literal_anchor_fields": len(anchors), "literal_anchor_values": sum(len(v) for v in anchors.values()),
             "literal_nonmatching_candidates": len(excluded),
+            "candidate_admission": "shared_literal_eligibility_and_witnesses_then_service_source_round_robin",
+            "literal_or_service_witness_caps": witness_limits,
             "selected": len(selected), **(detail or {}),
         }
+        if coverage:
+            metadata["requested_service_coverage"] = coverage
         provenance = StageProvenance("remapper", status, IMPLEMENTATION, model_name, revision, _json(metadata))
         return RemappedContext(retrieval, tuple(selected), tuple(dict.fromkeys(gaps)), (provenance,))
 
@@ -419,7 +390,8 @@ async def remap(retrieval: RetrievalResult, model: StructuredModel | None, *,
         gaps.append("no_candidate_record_contains_requested_literal_values")
         return finish(status="empty", reason="no_literal_value_match")
     payload, admitted, exhausted, base_exceeded, schema = _payload(retrieval, by_cell, config,
-        preserve_content=preserve_content, records=records, matched=matched, anchors=anchors)
+        preserve_content=preserve_content, records=records, matched=matched, anchors=anchors,
+        requested_services=requested_services)
     for cell in retrieval.cells:
         if len(by_cell[cell.cell_id]) > config.candidates_per_cell:
             gaps.append(f"{cell.cell_id}:remapper_candidate_limit_reached")

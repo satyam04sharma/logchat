@@ -115,10 +115,13 @@ def records_for_chunk(chunk):
 
 
 def embedding_text(chunk):
-    """Summaries embed compact excerpts/metrics; legacy local sections embed records."""
+    """Render by durable evidence version; historical vector inputs stay reproducible."""
     if chunk.compression_version == COMPACT_VERSION:
         evidence = validate_compact_chunk(chunk)
-        return _json({"model_summary": chunk.summary, "important_fields": evidence["important_fields"],
+        fields = evidence["important_fields"]
+        if evidence["version"] == COMPACT_EVIDENCE_V2:
+            fields = [{"key": field["key"], "value": field["value"]} for field in fields]
+        return _json({"model_summary": chunk.summary, "important_fields": fields,
                       "exact_metrics": asdict(chunk.metrics)})
     records = records_for_chunk(chunk)
     if chunk.compression_version == SUMMARY_VERSION:
@@ -209,8 +212,9 @@ def validate_refinement(original, refined):
     after = validate_batch(refined)
     if any(chunk.compression_version == COMPACT_VERSION for chunk in refined.chunks):
         if any(chunk.compression_version == COMPACT_VERSION for chunk in original.chunks):
-            if original != refined:
-                raise ValueError("compact_refinement_requires_original_source")
+            from logchat.rag.scheduler import _encode
+            if _encode(original) != _encode(refined):
+                validate_projection_upgrade(original, refined)
             return
         if any(chunk.compression_version != COMPACT_VERSION for chunk in refined.chunks):
             raise ValueError("mixed_compact_refinement")
@@ -713,7 +717,10 @@ async def summarize_batch(batch, local_model, *, config=None):
     return refined
 
 
-COMPACT_EVIDENCE_VERSION = "compact-evidence-v1"
+COMPACT_EVIDENCE_V1 = "compact-evidence-v1"
+COMPACT_EVIDENCE_V2 = "compact-evidence-v2"
+COMPACT_EVIDENCE_VERSION = COMPACT_EVIDENCE_V2
+_COMPACT_EVIDENCE_VERSIONS = {COMPACT_EVIDENCE_V1, COMPACT_EVIDENCE_V2}
 _COMPACT_METADATA = ("event_key", "event_id", "timestamp", "source", "service", "level", "release", "duration_ms", "request_status")
 _OMISSION_NOTICE = "Only selected original fields are retained; omitted source details cannot be recovered from this summary."
 _RAW_FIELD_NAMES = {"message", "msg", "raw_message", "raw_log", "raw_logs", "fingerprint", "supporting_records"}
@@ -877,7 +884,8 @@ def validate_compact_chunk(chunk):
     try:
         evidence = json.loads(chunk.compact_evidence)
         if (not isinstance(evidence, dict) or set(evidence) != {"version", "records", "important_fields", "uncertainties"}
-                or evidence["version"] != COMPACT_EVIDENCE_VERSION or _json(evidence) != chunk.compact_evidence):
+                or not isinstance(evidence["version"], str) or evidence["version"] not in _COMPACT_EVIDENCE_VERSIONS
+                or _json(evidence) != chunk.compact_evidence):
             raise ValueError()
         records = evidence["records"]
         if not isinstance(records, list) or not 1 <= len(records) <= 500:
@@ -923,6 +931,44 @@ def compact_records_for_chunk(chunk):
 
 def validate_compact_batch(batch):
     return validate_batch(batch, version=COMPACT_VERSION)
+
+
+def upgrade_embedding_projection(batch):
+    """Deterministic transport-only recovery; no source reconstruction or generation."""
+    validate_compact_batch(batch)
+    chunks = []
+    for chunk in batch.chunks:
+        evidence = validate_compact_chunk(chunk)
+        if evidence["version"] == COMPACT_EVIDENCE_V1:
+            evidence = _json({**evidence, "version": COMPACT_EVIDENCE_V2})
+            chunk = replace(chunk, compact_evidence=evidence,
+                            chunk_id=_compact_id(chunk, evidence, chunk.summary, chunk.summary_model))
+        chunks.append(chunk)
+    upgraded = replace(batch, chunks=tuple(chunks))
+    if upgraded != batch:
+        validate_projection_upgrade(batch, upgraded)
+    return upgraded
+
+
+def validate_projection_upgrade(original, upgraded):
+    """Only v1→v2 and its full-evidence-derived ID may change, with typed equality."""
+    from logchat.rag.scheduler import _encode
+    validate_compact_batch(original)
+    validate_compact_batch(upgraded)
+    if len(original.chunks) != len(upgraded.chunks):
+        raise ValueError("projection_upgrade_membership_mismatch")
+    normalized, changed = [], False
+    # Positional one-to-one mapping also conserves pattern identity and membership.
+    for old, new in zip(original.chunks, upgraded.chunks):
+        before, after = validate_compact_chunk(old), validate_compact_chunk(new)
+        if old.compact_evidence != new.compact_evidence:
+            if (before["version"] != COMPACT_EVIDENCE_V1 or after["version"] != COMPACT_EVIDENCE_V2
+                    or _json({**before, "version": COMPACT_EVIDENCE_V2}) != _json(after)):
+                raise ValueError("projection_upgrade_content_mismatch")
+            changed = True
+        normalized.append(replace(new, compact_evidence=old.compact_evidence, chunk_id=old.chunk_id))
+    if not changed or _encode(original) != _encode(replace(upgraded, chunks=tuple(normalized))):
+        raise ValueError("projection_upgrade_content_mismatch")
 
 
 def _correlation_field(key):

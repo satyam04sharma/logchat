@@ -13,7 +13,17 @@ from pipeline.redaction import redact_text
 
 MAX_TEXTS = 16
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_ERROR_BYTES = 1024
 PREFIX_VERSION = "prefix-v1"
+
+
+class EmbeddingContextExceeded(ModelUnavailable):
+    """Fixed content-free category; provider bodies never escape this boundary."""
+
+    category = "embedding_input_context_exceeded"
+
+    def __init__(self):
+        super().__init__(self.category)
 
 
 class OllamaEmbeddingProvider:
@@ -75,6 +85,8 @@ class OllamaEmbeddingProvider:
                         or not any(x != 0 for x in vector)):
                     raise ValueError()
             return tuple(tuple(float(x) for x in vector) for vector in vectors)
+        except EmbeddingContextExceeded:
+            raise EmbeddingContextExceeded() from None
         except Exception:
             raise ModelUnavailable("embedding_unavailable_or_invalid_response") from None
 
@@ -86,10 +98,18 @@ class OllamaEmbeddingProvider:
 
     async def _request(self, client, method, endpoint, *, payload=None):
         async with client.stream(method, self.base_url + endpoint, json=payload) as response:
-            response.raise_for_status()
             content = bytearray()
+            maximum = MAX_RESPONSE_BYTES if response.is_success else MAX_ERROR_BYTES
             async for part in response.aiter_bytes():
-                if len(content) + len(part) > MAX_RESPONSE_BYTES:
+                if len(content) + len(part) > maximum:
                     raise ValueError("embedding_response_bound_exceeded")
                 content.extend(part)
+            if response.status_code == 400 and method == "POST" and endpoint == "/api/embed":
+                data = json.loads(content)
+                if isinstance(data, dict) and data.get("error") in (
+                    "input length exceeds maximum context length",
+                    "the input length exceeds the context length",
+                ):
+                    raise EmbeddingContextExceeded() from None
+            response.raise_for_status()
         return json.loads(content)
