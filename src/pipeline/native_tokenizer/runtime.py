@@ -25,22 +25,34 @@ MAX_WIRE = 65536
 RESPONSE = struct.Struct(">4sII")
 REQUEST = struct.Struct(">4sIIII")
 
-if __package__:
-    from .architecture import ArchitectureError, architectures, compiler_target
-else:
-    # Isolated bootstrap: only load the sibling installed module, no sys.path.
-    import runpy
-    _architecture = runpy.run_path(str(Path(__file__).with_name("architecture.py")))
-    ArchitectureError = _architecture["ArchitectureError"]
-    architectures = _architecture["architectures"]
-    compiler_target = _architecture["compiler_target"]
 SOURCE_HASHES = {
+    "closure.py": "6511e938d27d92e5be6bedf11a050b281755c72eb85fdfd9799af427b5585adc",
     "worker.c": "c01f9efe8e4ba5abd66dbe5c5fbdff8a64495c7c45dde33b6834e70e2f5afeae",
     "architecture.py": "82ce01f8c6e0c471cd4e9f716548d81e0e580a466a1d269d0cbcdc7e04073126",
     "bridge.c": "9930d9f8f054ca2f87ce477d9dfec1bb235a5c6c7d5a0290d0ec41bb904c13e0",
     "bridge.h": "dbd1b1283e4bf9ecd44c8da587d1c0e0eabef356a21a91c8ecb6361f1104dc73",
     "sources.json": "5f83d081c8ec69572137e118f9b66cce4d54503ae9c70cc23612ec4ca47a68a5",
 }
+
+if __package__:
+    from .architecture import ArchitectureError, architectures, compiler_target
+    from .closure import ClosureError, LoaderMember, stage_closure
+else:
+    # Isolated bootstrap: only load the sibling installed module, no sys.path.
+    import runpy
+    # Check bootstrap helper bytes before executing their module-level code.
+    for name in ("architecture.py", "closure.py"):
+        if hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() != SOURCE_HASHES[name]:
+            raise RuntimeError("vocabulary_source_identity_mismatch")
+    _architecture = runpy.run_path(str(Path(__file__).with_name("architecture.py")))
+    ArchitectureError = _architecture["ArchitectureError"]
+    architectures = _architecture["architectures"]
+    compiler_target = _architecture["compiler_target"]
+    _closure = runpy.run_path(str(Path(__file__).with_name("closure.py")))
+    ClosureError = _closure["ClosureError"]
+    LoaderMember = _closure["LoaderMember"]
+    stage_closure = _closure["stage_closure"]
+
 
 
 class VocabularyRuntimeError(RuntimeError):
@@ -153,6 +165,11 @@ BOOT_ERRORS = {
     108: "vocabulary_architecture_unsupported",
     109: "vocabulary_architecture_mismatch",
     110: "vocabulary_worker_failed",
+    111: "vocabulary_loader_policy_invalid",
+    112: "vocabulary_loader_metadata_invalid",
+    113: "vocabulary_loader_resolution_unverified",
+    114: "vocabulary_loader_cpu_mismatch",
+    115: "vocabulary_loader_copy_mismatch",
 }
 
 
@@ -169,13 +186,18 @@ def _worker():
         config = json.loads(line)
         if not 2 <= len(config["assets"]) <= 34:
             raise VocabularyRuntimeError("vocabulary_asset_identity_invalid")
-        assets = [_VerifiedFile(Asset(**item)) for item in config["assets"]]
+        identities = [Asset(**item) for item in config["assets"]]
+        assets = [_VerifiedFile(asset) for asset in identities]
         cpu, flags = compiler_target(assets[0].path)
         binary = _build(Path(config["directory"]), flags, cpu)
+        library = assets[0].path
+        if config.get("loader_members") is not None:
+            members = tuple(LoaderMember(**item) for item in config["loader_members"])
+            library = str(stage_closure(identities, assets, members, config["directory"]))
         for asset in assets:
             asset.check()
-        os.execve(str(binary), [str(binary), assets[0].path, assets[1].path], _environment())
-    except (VocabularyRuntimeError, ArchitectureError) as error:
+        os.execve(str(binary), [str(binary), library, assets[1].path], _environment())
+    except (VocabularyRuntimeError, ArchitectureError, ClosureError) as error:
         code = next((code for code, name in BOOT_ERRORS.items() if name == str(error)), 110)
     except Exception:
         code = 110
@@ -190,12 +212,18 @@ class VocabularyRuntime:
     checks supplied files, but cannot certify completeness, GGUF semantics,
     provider identity or model-store trust. The provider adapter owns those gates.
     """
-    def __init__(self, library: Asset, model: Asset, *, dependencies=(), deadline: float):
+    def __init__(self, library: Asset, model: Asset, *, dependencies=(), deadline: float,
+                 loader_members=None):
         assets = (library, model, *dependencies)
         if not 2 <= len(assets) <= 34 or any(not isinstance(a, Asset) for a in assets):
             raise VocabularyRuntimeError("vocabulary_asset_identity_invalid")
         if type(deadline) not in {int, float} or not math.isfinite(deadline):
             raise VocabularyRuntimeError("vocabulary_deadline_invalid")
+        if loader_members is not None:
+            loader_members = tuple(loader_members)
+            if not 1 <= len(loader_members) <= 32 or any(not isinstance(m, LoaderMember) for m in loader_members):
+                raise VocabularyRuntimeError("vocabulary_loader_policy_invalid")
+        self._loader_members = loader_members
         self._assets = assets
         self._deadline = deadline
         self._process = None
@@ -227,7 +255,10 @@ class VocabularyRuntime:
                 self._process = await asyncio.shield(self._spawn_task)
                 self._revisions = tuple(_revision(a.path) for a in self._assets)
                 config = json.dumps({"assets": [a.__dict__ for a in self._assets],
-                                     "directory": directory}, separators=(",", ":")).encode() + b"\n"
+                                     "directory": directory,
+                                     "loader_members": (None if self._loader_members is None else
+                                                        [m.__dict__ for m in self._loader_members])},
+                                    separators=(",", ":")).encode() + b"\n"
                 if len(config) > MAX_WIRE:
                     raise VocabularyRuntimeError("vocabulary_asset_identity_invalid")
                 self._process.stdin.write(config)

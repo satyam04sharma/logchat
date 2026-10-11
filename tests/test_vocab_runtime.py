@@ -220,7 +220,7 @@ async def test_worker_death_fails_closed_and_removes_private_build(assets):
     assert_reaped(value)
 
 
-@pytest.mark.parametrize("name", ["sources.json", "vendor/llama.h", "bridge.h", "worker.c", "architecture.py"])
+@pytest.mark.parametrize("name", ["sources.json", "vendor/llama.h", "bridge.h", "worker.c", "architecture.py", "closure.py"])
 def test_all_compilation_inputs_are_identity_checked(tmp_path, monkeypatch, name):
     source = tmp_path / "source"
     shutil.copytree(Path(runtime.__file__).parent, source)

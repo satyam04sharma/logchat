@@ -161,3 +161,56 @@ encode byte length and flags; they are not real tokenizer or performance proof.
 Saved actual 7,502-token Mistral/ten Nomic parity remains a root-only gate after
 default integration and independent review. Existing planner, request budgets,
 embedding bytes, 400-record replay and downstream acceptance gates are unchanged.
+
+## Exact loader closure staging (provider admission prerequisite)
+
+`closure.py` adds an optional `loader_members` policy to `VocabularyRuntime`.
+Each member maps an already approved asset index to its required native install
+name. This mechanism does **not** discover or approve assets: expected digests
+must still come from an independently reviewed provider policy. Supplying files
+or hashing unknown files does not establish that policy. The existing no-policy
+runtime remains an internal primitive, unsuitable for default provider admission.
+
+The bounded parser accepts thin 64-bit Mach-O dylib metadata only. It requires
+one CPU, exact install IDs, exactly one `@loader_path` runpath per library, and
+an exact reachable graph of `@rpath` imports. Missing or unused members, duplicate
+names/indexes, absolute non-system imports, alternative runpaths, weak/reexport/
+upward imports and loader-environment commands are rejected before native load.
+Only `/usr/lib/libSystem.B.dylib` and `/usr/lib/libc++.1.dylib` are treated as
+macOS platform dependencies; the future production policy must establish the
+supported protected-dyld-cache OS trust boundary. This is not Linux, Windows,
+universal-binary or arbitrary macOS library certification.
+
+The owned bootstrap first hashes the supplied regular, symlink-free assets. It
+then exclusively creates a private `loader` directory, copies the library and
+its dependency bytes under their exact install names, verifies each copied
+hash, reinspects the staged graph, and checks original revisions before exec.
+The model is not copied. Native `dlopen` receives only the staged primary path;
+installed loader-name symlinks and source-directory fallback paths do not
+participate. Original asset revisions remain checked before/after counts, and
+staged files are removed with the owned build directory on completion, failure
+or cancellation. No persistent cache is introduced. Bootstrap helper source
+hashes are checked before their module code is executed; the helper also ships
+byte-for-byte with the native source package. Loader failures use fixed wire
+statuses 111–115 without forwarding metadata or paths.
+
+Read-only inspection of the root-reviewed Intel `libllama.0.4.1.dylib` confirms
+its imports are `@rpath/libggml.0.dylib` and `@rpath/libggml-base.0.dylib`, plus
+the two system names above. The versioned GGML files share its x86_64 CPU and
+`@loader_path` runpath. Their bundle loader-name aliases are symlinks. Private
+staging allows a future approved policy to use regular versioned files without
+trusting those aliases. No installed native library or model was loaded during
+this inspection, and dependency digests are **not** automatically approved.
+
+Offline tests exercise a real compiled inert x86_64 dependency and tokenizer
+stub, with an intentionally broken source-directory loader alias. The owned
+worker succeeds using only the private regular-file closure and deterministically
+frees/reaps it. Additional tests reject incomplete graphs, identity/CPU/revision/
+copy drift, ambiguous paths, unsupported commands and malformed bounded metadata.
+These are synthetic loader/IPC checks, not application tokenizer parity.
+
+**Remaining blocker:** automatic preserving `LocalModels` discovery/binding,
+reviewed provider/executable/dependency digest policy, template/full-request
+identity and request-cache lifetime are still absent. The existing architecture
+worker and this loader mechanism do not meet the production stop condition.
+Root actual default-adapter parity remains blocked until those are implemented.
