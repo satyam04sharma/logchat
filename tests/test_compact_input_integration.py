@@ -1,10 +1,11 @@
 """Complete projected request proofs using inert models and counters only."""
 from copy import deepcopy
+from dataclasses import asdict
 
 import pytest
 
 from logchat.rag.compact_bounds import compact_reservations
-from logchat.rag.compact_input import COMPACT_INPUT_VERSION, expand_compact_input
+from logchat.rag.compact_input import COLUMNAR_INPUT_VERSION, expand_compact_input
 from logchat.rag.sections import (
     CATALOG_COMPACT_INSTRUCTION, COMPACT_INSTRUCTION, SectionModelError,
     SummaryConfig, _compact_request, _expanded_compact_request,
@@ -14,6 +15,7 @@ from pipeline.model_transport import generation_body, model_json
 from pipeline.token_budget import request_digest
 from tests.test_catalog_compact_preflight import fixture
 from tests.test_rag_compact import CompactModel
+from tests.test_compact_columnar_codec import cell, spelling
 
 
 @pytest.mark.asyncio
@@ -25,11 +27,13 @@ async def test_factory_retains_complete_typed_input_schema_and_reservations(cata
     options = options if catalog else {}
     original, schema, metadata, fields = _expanded_compact_request(*args, **options)
     projected, projected_schema, projected_metadata, projected_fields = _compact_request(*args, **options)
-    assert model_json(expand_compact_input(projected)) == model_json(original)
+    assert spelling(expand_compact_input(projected)) == spelling(original)
     assert (projected_schema, projected_metadata, projected_fields) == (schema, metadata, fields)
     assert compact_reservations(projected, metadata, args[2]) == compact_reservations(original, metadata, args[2])
     assert list(projected['message_dictionary'].values()) == list(dict.fromkeys(views.values()))
-    assert COMPACT_INPUT_VERSION in (CATALOG_COMPACT_INSTRUCTION if catalog else COMPACT_INSTRUCTION)
+    assert COLUMNAR_INPUT_VERSION in (CATALOG_COMPACT_INSTRUCTION if catalog else COMPACT_INSTRUCTION)
+    assert projected['input_projection'] == COLUMNAR_INPUT_VERSION
+    assert all(set(projected[name]) == {'columns', 'rows'} for name in ('records', 'field_catalog'))
 
 
 @pytest.mark.asyncio
@@ -41,20 +45,20 @@ async def test_corrupt_projection_fails_before_any_physical_check_or_generation(
 
     corrupted = False
 
-    def corrupt(original):
+    def corrupt(original, **kwargs):
         nonlocal corrupted
-        result = project(original)
+        result = project(original, **kwargs)
         if corrupted:
             return result
         corrupted = True
         if mutation == 'wrongref':
-            result['records'][0]['message_ref'] = 'm999'
+            cell(result, 'records', 0, 'message_ref', 'm999')
         elif mutation == 'substitution':
             result['message_dictionary']['m0'] = 'substituted source'
         elif mutation == 'typed':
-            result['records'][0]['duration_ms'] = False
+            cell(result, 'records', 0, 'duration_ms', False)
         elif mutation == 'missing':
-            result['records'].pop()
+            result['records']['rows'].pop()
         elif mutation == 'version':
             result['input_projection'] = 'unknown'
         else:
@@ -74,6 +78,69 @@ async def test_corrupt_projection_fails_before_any_physical_check_or_generation(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('stage', ['characters', 'physical', 'generation'])
+async def test_complete_typed_proof_is_mandatory_at_each_request_stage(monkeypatch, stage):
+    import logchat.rag.compact_input as codec
+    import logchat.rag.compact_bounds as bounds
+    import logchat.rag.sections as sections
+
+    source, _, _ = await fixture(['operation failed with rare detail'] * 4)
+    project = codec.project_compact_input
+    armed = stage == 'characters'
+    corrupted = 0
+    checked = 0
+
+    def corrupt(original, **kwargs):
+        nonlocal corrupted
+        result = project(original, **kwargs)
+        if armed:
+            # Structurally canonical, but not the complete original typed input.
+            result['exact_metrics']['duration_sum_ms'] = False
+            corrupted += 1
+        return result
+
+    monkeypatch.setattr(codec, 'project_compact_input', corrupt)
+    if stage == 'physical':
+        pack = sections._pack_compact_sections
+
+        def after_characters(*args, **kwargs):
+            nonlocal armed
+            result = pack(*args, **kwargs)
+            armed = True
+            return result
+
+        monkeypatch.setattr(sections, '_pack_compact_sections', after_characters)
+    elif stage == 'generation':
+        pack = sections._pack_compact_physical
+
+        async def after_physical(*args, **kwargs):
+            nonlocal armed
+            result = await pack(*args, **kwargs)
+            armed = True
+            return result
+
+        monkeypatch.setattr(sections, '_pack_compact_physical', after_physical)
+    else:
+        def no_bounds(*args, **kwargs):
+            pytest.fail('Corruption reached character/evidence feasibility')
+
+        monkeypatch.setattr(bounds, 'compact_reservations', no_bounds)
+
+    class Never(CompactModel):
+        async def preflight_generation(self, *args):
+            nonlocal checked
+            assert not armed
+            checked += 1
+            return True
+
+    model = Never()
+    with pytest.raises(SectionModelError, match='^compact_input_projection_invalid:compact_summary$'):
+        await compact_summary_batch(source, model)
+    assert corrupted > 0 and model.calls == 0
+    assert (checked > 0) == (stage == 'generation')
+
+
+@pytest.mark.asyncio
 async def test_all_final_projected_requests_proved_before_first_generation():
     source, _, _ = await fixture(['operation failed with rare detail'] * 7)
 
@@ -85,13 +152,13 @@ async def test_all_final_projected_requests_proved_before_first_generation():
         async def preflight_generation(self, instruction, payload, schema):
             assert self.calls == 0
             assert instruction == CATALOG_COMPACT_INSTRUCTION
-            assert payload['input_projection'] == COMPACT_INPUT_VERSION
+            assert payload['input_projection'] == COLUMNAR_INPUT_VERSION
             expanded = expand_compact_input(payload)
-            assert len(expanded['records']) == len(payload['records'])
+            assert len(expanded['records']) == len(payload['records']['rows'])
             body = generation_body(self.chat_model, instruction, payload, schema)
             self.checked.append(deepcopy(body))
             # Explicit nonmonotonic synthetic predicate: no token estimate.
-            fits = len(payload['records']) in {1, 2, 4}
+            fits = len(payload['records']['rows']) in {1, 2, 4}
             if fits:
                 self.proofs.add(request_digest(body))
             return fits
@@ -106,8 +173,8 @@ async def test_all_final_projected_requests_proved_before_first_generation():
     model = ProofModel()
     compact = await compact_summary_batch(source, model)
     validate_refinement(source, compact)
-    assert [len(p['records']) for p in model.wire_payloads] == [1, 2, 4]
-    assert sum(len(p['records']) for p in model.wire_payloads) == 7
+    assert [len(p['records']['rows']) for p in model.wire_payloads] == [1, 2, 4]
+    assert sum(len(p['records']['rows']) for p in model.wire_payloads) == 7
     assert len(model.sent) == 3
     assert all(len(p['message_dictionary']) == 1 for p in model.wire_payloads)
 
@@ -145,7 +212,7 @@ async def test_exact_counter_and_generation_hook_receive_projected_complete_body
     expected = generation_body(model.chat_model, instruction, payload, schema)
     assert counter.requests == [expected, expected]
     assert sent == [expected]
-    assert json.loads(expected['prompt'])['input_projection'] == COMPACT_INPUT_VERSION
+    assert json.loads(expected['prompt'])['input_projection'] == COLUMNAR_INPUT_VERSION
     # Contract delivery only: an inert response does not prove model usefulness.
     policy = (
         'When safe eligible phrases exist, select quotes that jointly identify the operation\n'
@@ -159,3 +226,22 @@ async def test_exact_counter_and_generation_hook_receive_projected_complete_body
     assert request_digest(without_policy) != request_digest(expected)
     assert schema['properties'][selection_key]['maxItems'] == 4
     assert payload['combined_field_limit'] == 64
+
+
+@pytest.mark.asyncio
+async def test_same_mock_selections_produce_identical_durable_results_for_both_versions(monkeypatch):
+    import logchat.rag.sections as sections
+    from logchat.rag.compact_input import COMPACT_INPUT_VERSION
+    from tests.test_rag_compact import sections_fixture
+
+    source = await sections_fixture()
+    current_model = CompactModel()
+    current = await compact_summary_batch(source, current_model)
+    monkeypatch.setattr(sections, 'COLUMNAR_INPUT_VERSION', COMPACT_INPUT_VERSION)
+    historical_model = CompactModel()
+    historical = await compact_summary_batch(source, historical_model)
+    assert asdict(current) == asdict(historical)
+    assert current_model.payloads == historical_model.payloads
+    assert all(p['input_projection'] == COLUMNAR_INPUT_VERSION for p in current_model.wire_payloads)
+    assert all(p['input_projection'] == COMPACT_INPUT_VERSION for p in historical_model.wire_payloads)
+    # Identical mock choices prove durable contracts, not real model usefulness.

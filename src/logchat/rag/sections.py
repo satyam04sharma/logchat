@@ -16,7 +16,7 @@ import math
 import re
 
 from logchat.rag.contracts import MAX_COMPACT_EVIDENCE_CHARS, MAX_MODEL_SUMMARY_CHARS, MAX_SUMMARY_CHARS, ExactMetrics, PreparedBatch, SemanticChunk, utc
-from logchat.rag.compact_input import COMPACT_INPUT_VERSION
+from logchat.rag.compact_input import COLUMNAR_INPUT_VERSION, expand_compact_input
 from pipeline.models import ModelUnavailable
 from logchat.rag.source_observations import (
     EVIDENCE_VERSION as COMPACT_EVIDENCE_V3, RENDER_VERSION, render_observations, observation_embedding,
@@ -798,10 +798,11 @@ projection bodies before packing.
 # Both legacy phrase selectors and catalog selectors see the same reversible
 # representation. These exact instructions participate in full-request proofs.
 _COMPACT_INPUT_INSTRUCTION = f"""
-Input projection {COMPACT_INPUT_VERSION}: message_dictionary maps message_ref IDs
-to exact source messages. For each ordered records row, read its message_ref in
-message_dictionary as that record's message. A shared message does not merge
-records: retain each row's ref, timestamp, status and duration attribution.
+Input projection {COLUMNAR_INPUT_VERSION}: records and field_catalog are tables.
+Each rows array maps positionally to its table's ordered columns. Optional
+presence arrays mark absent cells false; true preserves the value, including null.
+message_dictionary maps each record's message_ref to its exact source message.
+Shared messages do not merge records; retain row order and all attributions.
 Field and phrase catalogs retain all choices and their original meanings.
 """
 COMPACT_INSTRUCTION += _COMPACT_INPUT_INSTRUCTION
@@ -1205,7 +1206,7 @@ def _compact_request(chunk, records, config, messages=None, **catalog_options):
     original, schema, metadata, catalogs = _expanded_compact_request(
         chunk, records, config, messages, **catalog_options)
     try:
-        payload = project_compact_input(original)
+        payload = project_compact_input(original, version=COLUMNAR_INPUT_VERSION)
         validate_compact_input_projection(original, payload)
     except (ValueError, TypeError, KeyError, RecursionError):
         raise SectionModelError("compact_input_projection_invalid", "compact_summary") from None
@@ -1396,7 +1397,7 @@ async def _compact_summary_batch(batch, local_model, *, config=None, model_event
             raise SectionModelError(category, "compact_summary") from None
         try:
             field_lookup = {field["field_ref"]: {key: field[key] for key in ("key", "value", "event_refs")}
-                            for field in payload["field_catalog"]}
+                            for field in expand_compact_input(payload)["field_catalog"]}
             views = {row["ref"]: messages[record["event_key"]] for row, record in zip(metadata, records)}
             bodies = {row["ref"]: excluded_messages[record["event_key"]] for row, record in zip(metadata, records)}
             observations, selections = select_catalog_observations(value, metadata, views, bodies, field_lookup, catalog,

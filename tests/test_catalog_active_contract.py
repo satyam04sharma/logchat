@@ -6,7 +6,7 @@ import pytest
 
 from tests.catalog_selector import role_selections
 
-from logchat.rag.compact_input import COMPACT_INPUT_VERSION, expand_compact_input
+from logchat.rag.compact_input import COLUMNAR_INPUT_VERSION, expand_compact_input
 from logchat.rag.sections import (
     CATALOG_COMPACT_INSTRUCTION, SectionModelError, SummaryConfig, _compact_request,
     compact_summary_batch, records_for_chunk, section_batch,
@@ -73,7 +73,7 @@ async def test_one_global_catalog_used_before_packing_and_for_every_request(monk
     assert all(call[0] == CATALOG_COMPACT_INSTRUCTION for call in model.calls)
     expanded_records = []
     for _, payload, _ in model.calls:
-        assert payload['input_projection'] == COMPACT_INPUT_VERSION
+        assert payload['input_projection'] == COLUMNAR_INPUT_VERSION
         rows = expand_compact_input(payload)['records']
         assert len(rows) == 1  # Each 33-field member requires its own request.
         expanded_records.extend(rows)
@@ -120,7 +120,7 @@ async def test_complete_field_heavy_singleton_and_lossless_table_full_request_co
     rows = records_for_chunk(chunk)
     old, _, _, _ = _compact_request(chunk, rows, SummaryConfig())
     assert all(payload[k] == value for k, value in old.items())
-    assert len(payload['field_catalog']) == 53
+    assert len(expand_compact_input(payload)['field_catalog']) == 53
     assert len(validate_compact_chunk(compact.chunks[0])['important_fields']) == 53
     full = instruction + SYSTEM_SAFETY_SUFFIX + model_json(payload) + model_json(schema)
     objects = {**payload, 'phrase_catalog': [{'phrase_ref': ref, 'text': text}

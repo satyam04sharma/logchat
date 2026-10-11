@@ -191,12 +191,12 @@ async def test_reserves_full_optional_union_independently_for_chars_and_utf8():
     from logchat.rag.compact_bounds import compact_reservations
     bounds = compact_reservations(payload, metadata, SummaryConfig())
     required = payload['required_field_refs']
-    assert len(required) == 10 and len(payload['field_catalog']) == 70
+    assert len(required) == 10 and len(expand_compact_input(payload)['field_catalog']) == 70
 
     class Maximal(Selector):
         async def generate(self, instruction, payload, schema):
             value = await super().generate(instruction, payload, schema)
-            optional = [f for f in payload['field_catalog'] if f['field_ref'] not in required]
+            optional = [f for f in expand_compact_input(payload)['field_catalog'] if f['field_ref'] not in required]
             optional.sort(key=lambda f: len(_json(f).encode()) if self.fields else len(_json(f)), reverse=True)
             value['important_fields'] = required + [f['field_ref'] for f in optional[:54]]
             return value

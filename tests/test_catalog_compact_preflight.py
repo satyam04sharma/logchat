@@ -1,4 +1,5 @@
 """Offline catalog transport/preflight; production activation is a separate gate."""
+from logchat.rag.compact_input import expand_compact_input
 from dataclasses import replace
 from itertools import combinations
 
@@ -83,7 +84,7 @@ async def test_every_small_catalog_selection_and_redundant_response_fits_reserva
         assert not refs
         assert payload['catalog_omissions'] == [
             {'record_ref': row['ref'], 'reason': 'no_safe_proposal_in_grammar'} for row in records]
-        assert len(payload['records']) == 2
+        assert len(expand_compact_input(payload)['records']) == 2
 
 
 @pytest.mark.asyncio
@@ -144,7 +145,7 @@ async def test_global_catalog_rebinds_after_packing_without_record_or_field_loss
     for chunk in packed.chunks:
         payload, _, _, _ = _compact_request(chunk, records_for_chunk(chunk), SummaryConfig(), views, **options)
         assert len(payload['required_field_refs']) == 33
-        assert len(payload['field_catalog']) == 33
+        assert len(expand_compact_input(payload)['field_catalog']) == 33
         catalogs.append(payload['phrase_catalog'])
         _compact_feasible(chunk, records_for_chunk(chunk), SummaryConfig(), views, **options)
     assert catalogs[0] == catalogs[1] == catalogs[2]
@@ -190,8 +191,8 @@ async def test_full_required_optional_union_bounds_include_typed_utf8_and_escapi
     payload, _, records, _ = _compact_request(chunk, records_for_chunk(chunk), SummaryConfig(), views, **options)
     bounds = _compact_feasible(chunk, records_for_chunk(chunk), SummaryConfig(), views, **options)
     required = set(payload['required_field_refs'])
-    mandatory = [f for f in payload['field_catalog'] if f['field_ref'] in required]
-    optional = [f for f in payload['field_catalog'] if f['field_ref'] not in required]
+    mandatory = [f for f in expand_compact_input(payload)['field_catalog'] if f['field_ref'] in required]
+    optional = [f for f in expand_compact_input(payload)['field_catalog'] if f['field_ref'] not in required]
     assert len(mandatory) == 10 and len(optional) == 60
     phrase = max(payload['phrase_catalog'], key=lambda p: len(p[0]))[0]
     for byte in (False, True):

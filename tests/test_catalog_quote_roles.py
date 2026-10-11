@@ -1,4 +1,5 @@
 """Pure explicit-role controls; intentions never authenticate usefulness or facts."""
+from logchat.rag.compact_input import expand_compact_input
 from copy import deepcopy
 from dataclasses import replace
 from itertools import permutations
@@ -27,7 +28,7 @@ async def contract(messages=None):
     catalog = options['source_catalog']
     def select(value):
         return select_catalog_observations(value, records, local_views, bodies,
-            [f['field_ref'] for f in payload['field_catalog']], catalog, output_budget=8000)
+            [f['field_ref'] for f in expand_compact_input(payload)['field_catalog']], catalog, output_budget=8000)
     return payload, schema, records, local_views, bodies, catalog, select
 
 
@@ -134,7 +135,7 @@ async def test_complete_serialized_role_envelopes_and_historical_reservations():
     # membership or catalog eligibility. Production refs are shorter ASCII IDs.
     escaped_ref = 'p\\"\n😀é'
     catalog = replace(catalog, phrases=(replace(catalog.phrases[0], phrase_ref=escaped_ref),))
-    payload = {**payload, 'phrase_catalog': [[escaped_ref, catalog.phrases[0].text]],
+    payload = {**expand_compact_input(payload), 'phrase_catalog': [[escaped_ref, catalog.phrases[0].text]],
                'field_catalog': [{'field_ref': 'f\\"😀', 'key': 'key', 'value': '😀\\"', 'event_refs': ['e0']}],
                'required_field_refs': []}
     bounds = compact_reservations(payload, records, SummaryConfig())

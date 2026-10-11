@@ -1,4 +1,5 @@
 """Production typed-field regression: exact structured quotes, no native model."""
+from logchat.rag.compact_input import expand_compact_input
 from tests.physical_preflight import SyntheticPhysicalPreflight
 from copy import deepcopy
 from itertools import combinations
@@ -100,7 +101,7 @@ async def test_actual_typed_values_offer_exact_content_and_preserve_complete_inp
     assert observation['exact_metrics']['status_counts'] == {'503': 1}
     expected, _, _, _ = _compact_request(source.chunks[0], records_for_chunk(source.chunks[0]),
                                         SummaryConfig(), messages, **options)
-    assert len(evidence['important_fields']) == len(expected['field_catalog'])
+    assert len(evidence['important_fields']) == len(expand_compact_input(expected)['field_catalog'])
 
 
 @pytest.mark.asyncio
