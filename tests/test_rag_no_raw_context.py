@@ -1,6 +1,7 @@
 """Context consumers use compact selected facts without original event messages."""
 from tests.physical_preflight import SyntheticPhysicalPreflight
 from tests.catalog_selector import select_topics
+from logchat.rag.compact_input import expand_compact_input
 from dataclasses import replace
 import json
 import pytest
@@ -16,6 +17,7 @@ class SummaryModel(SyntheticPhysicalPreflight):
     local_only=True;preserve_content=True;chat_model='chosen-local-model'
     async def generate(self,instruction,context,schema):
         if 'items' in context:return {'sections':[[r['ref'] for r in context['items']]]}
+        context = expand_compact_input(context)
         fields=[field['field_ref'] for field in context['field_catalog'] if field['key'] in {'email','phone','error_code'}]
         assert set(schema['properties']) == {'selections', 'important_fields'}
         return {**select_topics(context, ['Session renewal rejected']),

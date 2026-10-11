@@ -1,4 +1,5 @@
 from tests.catalog_selector import select_topics
+from logchat.rag.compact_input import expand_compact_input
 from tests.physical_preflight import SyntheticPhysicalPreflight
 import asyncio,json
 from datetime import datetime,timedelta,timezone
@@ -31,6 +32,7 @@ async def test_preserved_intake_refinement_embedding_query_inspection_and_chat(t
         def __init__(self,**kwargs):pass
         async def generate(self,instruction,context,schema):
             if 'records' in context:
+                context = expand_compact_input(context)
                 assert set(schema['properties']) == {'selections', 'important_fields'}
                 return {**select_topics(context, ['Session failure']),
                     'important_fields':[field['field_ref'] for field in context['field_catalog'] if field['key'] in {'email','phone','error_code'}]}

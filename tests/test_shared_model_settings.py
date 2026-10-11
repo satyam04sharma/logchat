@@ -1,6 +1,7 @@
 """Shared settings use real local SQLite and mocked local model calls only."""
 from tests.physical_preflight import SyntheticPhysicalPreflight
 from tests.catalog_selector import select_topics
+from logchat.rag.compact_input import expand_compact_input
 import asyncio
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -54,6 +55,7 @@ class Generation(SyntheticPhysicalPreflight):
                 self.state["intake_started"].set()
                 await self.state["intake_release"].wait()
             return {"sections": [[item["ref"] for item in context["items"]]]}
+        context = expand_compact_input(context)
         assert set(schema['properties']) == {'selections', 'important_fields'}
         return {**select_topics(context, ["Request failed"]),
                 "important_fields": [field["field_ref"] for field in context["field_catalog"] if field["key"] == "error_code"]}

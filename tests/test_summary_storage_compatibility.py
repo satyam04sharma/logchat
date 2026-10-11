@@ -1,6 +1,7 @@
 """Backward replay and exact search when embeddings use compact text."""
 from tests.physical_preflight import SyntheticPhysicalPreflight
 from tests.catalog_selector import select_topics
+from logchat.rag.compact_input import expand_compact_input
 import asyncio
 import json
 from dataclasses import asdict, replace
@@ -37,6 +38,7 @@ def test_compact_summary_lexical_search_retains_selected_exact_identifiers(tmp_p
         local_only=True;preserve_content=True;chat_model='fixture-local'
         async def generate(self,instruction,context,schema):
             if 'items' in context:return {'sections':[[row['ref'] for row in context['items']]]}
+            context = expand_compact_input(context)
             assert set(schema['properties']) == {'selections', 'important_fields'}
             return {**select_topics(context, ['Session renewal rejected']),
                     'important_fields':[f['field_ref'] for f in context['field_catalog'] if f['key']=='user']}
