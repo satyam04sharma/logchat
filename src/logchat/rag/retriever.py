@@ -24,7 +24,7 @@ from logchat.rag.contracts import (
 )
 from pipeline.redaction import redact_text
 
-IMPLEMENTATION = "scoped-hybrid-rrf-v3"
+IMPLEMENTATION = "scoped-hybrid-rrf-v4"
 _TOKEN = re.compile(r"[A-Za-z0-9][\w.-]{1,79}")
 
 
@@ -226,6 +226,30 @@ def _hits(cell, values, method, limit, *, preserve_content=False):
     return rows
 
 
+def _requested_identifiers(question):
+    """Infer exact intent conservatively, independently of retrieved values.
+
+    Punctuated IDs with letters and digits are exact requests even in prose.
+    A standalone mixed-case code is also exact. Plain uppercase topics (HTTP,
+    SDK, RAG), prose words, counts and version mentions in prose stay semantic.
+    Matching stays case-sensitive and bounded by complete source tokens.
+    """
+    stripped = question.strip().rstrip("?!.")
+    return tuple(dict.fromkeys(token for token in (raw.rstrip(".") for raw in _TOKEN.findall(question))
+        if not token.startswith("REDACTED_") and (
+            (any(c.isalpha() for c in token) and any(c.isdigit() for c in token)
+             and ("_" in token or "-" in token))
+            or (token == stripped and (re.search(r"[a-z][A-Z]", token)
+                or (any(c.isalpha() for c in token) and any(c.isdigit() for c in token)))))))
+
+
+def _identifier_in_record(identifier, record):
+    # Retained source data only; generated summaries and replay hashes cannot
+    # manufacture support. Original prose may carry an ID without a field.
+    return any(_literal_in_question(identifier, value) for _, value in
+               _scalars({key: value for key, value in record.items() if key != "event_key"}))
+
+
 def _identifiers(question):
     return {token.casefold() for token in _TOKEN.findall(question)
             if not token.startswith("REDACTED_") and ("_" in token
@@ -244,9 +268,19 @@ def _rank(cell, vector_hits, lexical_hits, question, config, *, preserve_content
             chunks[identifier] = hit.chunk
             target[identifier] = hit
     identifiers = _identifiers(question)
+    requested = _requested_identifiers(question)
+    standalone = requested if len(requested) == 1 and requested[0] == question.strip().rstrip("?!.") else ()
     candidates, rejected = [], 0
     for identifier, chunk in chunks.items():
         vector, lex = vectors.get(identifier), lexical.get(identifier)
+        if standalone:
+            if preserve_content and chunk.compression_version in {SUMMARY_VERSION, COMPACT_VERSION}:
+                supported = any(_identifier_in_record(standalone[0], row) for row in records_for_chunk(chunk))
+            else:
+                supported = _literal_in_question(standalone[0], chunk.summary)
+            if not supported:
+                rejected += 1
+                continue
         exact = bool(lex and identifiers.intersection(token.casefold() for token in
                      _TOKEN.findall(chunk.summary + " " + chunk.pattern_id)))
         if lex and preserve_content and chunk.compression_version in {SUMMARY_VERSION, COMPACT_VERSION} and not exact:

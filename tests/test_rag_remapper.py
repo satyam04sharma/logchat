@@ -76,6 +76,51 @@ class RemapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(detail["confidence_calibrated"])
         self.assertEqual(len(model.calls), 1)
 
+    async def test_absent_identifier_cannot_be_overridden_by_confident_model(self):
+        for preserved in (False, True):
+            for identifier in ("QUANTUM_NONEXISTENT_92731", "UNKNOWN_FAULT_68124", "AbsentLeaseFault"):
+                with self.subTest(preserved=preserved, identifier=identifier):
+                    model = Model({"selections": [selection(confidence=1.0)]})
+                    checked = await remap(retrieval(question=identifier), model, preserve_content=preserved)
+                    self.assertFalse(checked.selected)
+                    self.assertFalse(model.calls)
+                    self.assertIn("no_candidate_record_contains_requested_literal_values", checked.gaps)
+
+    async def test_repeated_observations_require_model_relevance_with_all_distinct_contract(self):
+        source = retrieval((candidate("first"), candidate("second")))
+        model = Model({"selections": [selection("e0"), selection("e1")]})
+        checked = await remap(source, model)
+        self.assertEqual([item.candidate.chunk.chunk_id for item in checked.selected], ["first", "second"])
+        self.assertIn("Select ALL distinct relevant observations", model.calls[0][0])
+        self.assertIn("Do not collapse them to one representative", model.calls[0][0])
+        rejected = await remap(source, Model({"selections": []}))
+        self.assertFalse(rejected.selected)
+
+    async def test_known_and_missing_constraints_cooccur_in_retained_records(self):
+        from logchat.rag.sections import encode_records, record_metrics
+        from logchat.rag.builder import event_key
+        row = {"event_key": event_key(IDENTITY, "event-a"), "event_id": "event-a", "timestamp": START.isoformat(),
+               "source": "browser", "service": "web", "level": "error", "release": None,
+               "fingerprint": "session-rejected", "message": 'Session rejected\nStructured fields: {"code":"AUTH-42"}',
+               "duration_ms": None, "request_status": None}
+        original = candidate("known")
+        item = replace(original, chunk=replace(original.chunk, summary=encode_records((row,)),
+                       metrics=record_metrics((row,)), first_event_at=START, last_event_at=START,
+                       compression_version="local-model-section-v1"))
+        config = RemapConfig(input_byte_budget=48000)
+        for question in ("Investigate AUTH-42 and ABSENT_FAULT_72", "Inspect AUTH-420", "Inspect auth-42"):
+            with self.subTest(question=question):
+                model = Model({"selections": [selection(confidence=1.0)]})
+                checked = await remap(retrieval((item,), question=question), model,
+                                     preserve_content=True, config=config)
+                self.assertFalse(checked.selected)
+                self.assertFalse(model.calls)
+        model = Model()
+        checked = await remap(retrieval((item,), question="Inspect AUTH-42"), model,
+                             preserve_content=True, config=config)
+        self.assertEqual(len(checked.selected), 1)
+        self.assertEqual(len(model.calls), 1)
+
     async def test_valid_empty_selection_is_no_evidence_without_arbitrary_top_neighbor(self):
         result = await remap(retrieval(question="How did lunar tides change?"), Model({"selections": []}))
         self.assertEqual(result.selected, ())

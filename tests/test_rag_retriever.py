@@ -101,6 +101,23 @@ class RetrieverTests(unittest.IsolatedAsyncioTestCase):
         result = await retrieve("NebulaShardLeaseLost", (CELL,), backend, Provider())
         self.assertEqual([c.chunk.chunk_id for c in result.candidates], ["rare"])
 
+    async def test_absent_standalone_identifiers_reject_high_similarity_neighbors(self):
+        for question in ("QUANTUM_NONEXISTENT_92731", "UNSEEN_FAILURE_48629", "AbsentLeaseFault", "ticket9172"):
+            with self.subTest(question=question):
+                result = await retrieve(question, (CELL,), Backend(vectors=(hit(score=.99),)), Provider())
+                self.assertEqual(result.candidates, ())
+                detail = json.loads(next(p.detail for p in result.provenance if p.stage == "retrieval_cell"))
+                self.assertEqual(detail["gate_rejected"], 1)
+
+    async def test_uppercase_topics_remain_semantic_and_identifier_case_is_exact(self):
+        for topic in ("HTTP", "SDK", "RAG", "Why did HTTP 500 requests spike?"):
+            with self.subTest(topic=topic):
+                result = await retrieve(topic, (CELL,), Backend(), Provider())
+                self.assertEqual(len(result.candidates), 1)
+        result = await retrieve("LEASE_FAIL_42", (CELL,),
+            Backend(vectors=(hit(chunk(summary="lease_fail_42 rejected"), .99),)), Provider())
+        self.assertFalse(result.candidates)
+
     async def test_plain_lexical_match_does_not_bypass_semantic_gate(self):
         backend = Backend(vectors=(hit(score=.2),), lexical=(hit(method="lexical"),))
         result = await retrieve("login", (CELL,), backend, Provider())
