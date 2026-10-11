@@ -163,7 +163,7 @@ def test_source_corruption_rejected_before_compile(tmp_path, monkeypatch):
     build.mkdir()
     with pytest.raises(VocabularyRuntimeError, match="source_identity_mismatch"):
         runtime._build(build)
-    assert not (build / "bridge.so").exists()
+    assert not (build / "worker").exists()
 
 
 def test_runtime_environment_excludes_injection_and_credentials(monkeypatch):
@@ -220,7 +220,7 @@ async def test_worker_death_fails_closed_and_removes_private_build(assets):
     assert_reaped(value)
 
 
-@pytest.mark.parametrize("name", ["sources.json", "vendor/llama.h", "bridge.h"])
+@pytest.mark.parametrize("name", ["sources.json", "vendor/llama.h", "bridge.h", "worker.c", "architecture.py"])
 def test_all_compilation_inputs_are_identity_checked(tmp_path, monkeypatch, name):
     source = tmp_path / "source"
     shutil.copytree(Path(runtime.__file__).parent, source)
@@ -230,7 +230,7 @@ def test_all_compilation_inputs_are_identity_checked(tmp_path, monkeypatch, name
     build.mkdir()
     with pytest.raises(VocabularyRuntimeError, match="source_identity_mismatch"):
         runtime._build(build)
-    assert not (build / "bridge.so").exists()
+    assert not (build / "worker").exists()
 
 
 @pytest.mark.asyncio
@@ -243,3 +243,83 @@ async def test_close_does_not_wait_behind_a_stalled_count(assets):
         with pytest.raises(VocabularyRuntimeError):
             await task
         assert_reaped(value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header", [
+    runtime.REQUEST.pack(b"oops", 1, 0, 0, 0),
+    runtime.REQUEST.pack(b"LCQ1", 2, 0, 0, 0),
+    runtime.REQUEST.pack(b"LCQ1", 1, runtime.MAX_BYTES + 1, 0, 0),
+    runtime.REQUEST.pack(b"LCQ1", 1, 0, runtime.MAX_TOKENS + 1, 0),
+    runtime.REQUEST.pack(b"LCQ1", 1, 0, 0, 4),
+    runtime.REQUEST.pack(b"LCQ1", 0, 1, 0, 0),
+])
+async def test_native_worker_rejects_malformed_frames_and_frees(assets, header):
+    value = owner(assets)
+    async with value:
+        value._process.stdin.write(header)
+        await value._process.stdin.drain()
+        assert await value._process.stdout.readexactly(12) == runtime.RESPONSE.pack(b"LCR1", 1, 0)
+        await asyncio.wait_for(value._process.wait(), timeout=2)
+        assert await value._process.stdout.read() == b""
+    assert_reaped(value)
+    assert Path(assets[1].path + ".audit").read_text() == "open\nfree\n"
+
+
+@pytest.mark.asyncio
+async def test_truncated_payload_eof_frees_without_echoing_input(assets):
+    value = owner(assets)
+    async with value:
+        value._process.stdin.write(runtime.REQUEST.pack(b"LCQ1", 1, 100, 100, 3) + b"private")
+        await value._process.stdin.drain()
+        value._process.stdin.close()
+        await asyncio.wait_for(value._process.wait(), timeout=2)
+        assert await value._process.stdout.read() == b""
+    assert_reaped(value)
+    assert Path(assets[1].path + ".audit").read_text() == "open\nfree\n"
+
+
+@pytest.mark.asyncio
+async def test_maximum_frame_preserves_all_bytes(assets):
+    async with owner(assets) as value:
+        data = (b"\0\xc3\xa9x" * (runtime.MAX_BYTES // 4))
+        assert await value.count(data, add_special=False, parse_special=False) == runtime.MAX_BYTES
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "darwin", reason="Apple cross-target compiler/translation test")
+async def test_real_intel_worker_uses_library_cpu_not_python_cpu(assets):
+    # Controlled inert library only; never use the installed Ollama dylib.
+    library = Path(assets[0].path)
+    sources = Path(runtime.__file__).parent
+    subprocess.run(["/usr/bin/cc", "-arch", "x86_64", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                    "-dynamiclib", "-I", str(sources / "vendor"),
+                    str(Path(__file__).parent / "native/runtime_vocab_stub.c"),
+                    "-o", str(library)], check=True, capture_output=True, timeout=30)
+    value = owner((identity(library), *assets[1:]))
+    async with value:
+        assert value.cpu == "x86_64"
+        assert runtime.architectures(Path(value._directory.name) / "worker", executable=True) == ("darwin", {"x86_64"})
+        assert await value.count("雪\0[INST]".encode(), add_special=True, parse_special=True) == 13
+    assert_reaped(value)
+
+
+@pytest.mark.asyncio
+async def test_close_deadline_includes_stalled_stdin_drain(assets, monkeypatch):
+    value = owner(assets)
+    async with value:
+        async def stalled():
+            await asyncio.Future()
+        monkeypatch.setattr(value._process.stdin, "drain", stalled)
+        await asyncio.wait_for(value.aclose(), timeout=3)
+    assert_reaped(value)
+
+
+@pytest.mark.asyncio
+async def test_deleted_asset_diagnostic_contains_no_private_path(assets):
+    value = owner(assets)
+    async with value:
+        Path(assets[2].path).unlink()
+        with pytest.raises(VocabularyRuntimeError, match="^vocabulary_asset_identity_invalid$"):
+            await value.count(b"private", add_special=True, parse_special=True)
+    assert_reaped(value)

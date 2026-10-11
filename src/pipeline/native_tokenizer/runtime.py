@@ -5,8 +5,6 @@ these from request paths or from freshly calculated hashes of unknown binaries.
 Import has no native side effects. Use an async context with an absolute deadline.
 """
 import asyncio
-import base64
-import ctypes
 from dataclasses import dataclass
 import hashlib
 import json
@@ -16,14 +14,29 @@ from pathlib import Path
 import re
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
 
 MAX_BYTES = 1048576
 MAX_TOKENS = 1048576
-MAX_WIRE = 1500000
+MAX_WIRE = 65536
+RESPONSE = struct.Struct(">4sII")
+REQUEST = struct.Struct(">4sIIII")
+
+if __package__:
+    from .architecture import ArchitectureError, architectures, compiler_target
+else:
+    # Isolated bootstrap: only load the sibling installed module, no sys.path.
+    import runpy
+    _architecture = runpy.run_path(str(Path(__file__).with_name("architecture.py")))
+    ArchitectureError = _architecture["ArchitectureError"]
+    architectures = _architecture["architectures"]
+    compiler_target = _architecture["compiler_target"]
 SOURCE_HASHES = {
+    "worker.c": "c01f9efe8e4ba5abd66dbe5c5fbdff8a64495c7c45dde33b6834e70e2f5afeae",
+    "architecture.py": "82ce01f8c6e0c471cd4e9f716548d81e0e580a466a1d269d0cbcdc7e04073126",
     "bridge.c": "9930d9f8f054ca2f87ce477d9dfec1bb235a5c6c7d5a0290d0ec41bb904c13e0",
     "bridge.h": "dbd1b1283e4bf9ecd44c8da587d1c0e0eabef356a21a91c8ecb6361f1104dc73",
     "sources.json": "5f83d081c8ec69572137e118f9b66cce4d54503ae9c70cc23612ec4ca47a68a5",
@@ -48,6 +61,13 @@ class Asset:
 
 
 def _revision(path):
+    try:
+        return _file_revision(path)
+    except OSError:
+        raise VocabularyRuntimeError("vocabulary_asset_identity_invalid") from None
+
+
+def _file_revision(path):
     target = Path(path)
     # Reject symlinks in every component, including an otherwise safe leaf.
     for component in (target, *target.parents):
@@ -77,7 +97,7 @@ class _VerifiedFile:
             raise VocabularyRuntimeError("vocabulary_asset_revision_changed")
 
 
-def _build(directory):
+def _build(directory, target_flags=(), cpu=None):
     """Copy verified bytes before compilation; never use a shared binary cache."""
     source = Path(__file__).resolve().parent
     manifest_bytes = (source / "sources.json").read_bytes()
@@ -93,12 +113,12 @@ def _build(directory):
         target = directory / name
         target.parent.mkdir(exist_ok=True)
         target.write_bytes(data)
-    output = directory / "bridge.so"
+    output = directory / "worker"
     if sys.platform not in {"darwin", "linux"}:
         raise VocabularyRuntimeError("vocabulary_platform_unsupported")
-    args = ["/usr/bin/cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-fPIC",
-            "-dynamiclib" if sys.platform == "darwin" else "-shared",
-            "-I", str(directory / "vendor"), str(directory / "bridge.c"),
+    args = ["/usr/bin/cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+            *target_flags, "-I", str(directory / "vendor"),
+            str(directory / "bridge.c"), str(directory / "worker.c"),
             "-o", str(output)]
     if sys.platform == "linux":
         args.append("-ldl")
@@ -108,6 +128,10 @@ def _build(directory):
                        env=_environment(), timeout=30)
     except (OSError, subprocess.SubprocessError):
         raise VocabularyRuntimeError("vocabulary_compiler_unavailable_or_failed") from None
+    if cpu is not None:
+        system, cpus = architectures(output, executable=True)
+        if system != sys.platform or cpus != {cpu}:
+            raise VocabularyRuntimeError("vocabulary_architecture_mismatch")
     return output
 
 
@@ -116,74 +140,47 @@ def _environment():
     return {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C", "LC_ALL": "C"}
 
 
-def _api(path):
-    api = ctypes.CDLL(str(path))
-    api.lc_vocab_abi.argtypes = []
-    api.lc_vocab_abi.restype = ctypes.c_uint32
-    if api.lc_vocab_abi() != 1:
-        raise VocabularyRuntimeError("vocabulary_bridge_abi_mismatch")
-    api.lc_vocab_open.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p)]
-    api.lc_vocab_open.restype = ctypes.c_int
-    api.lc_vocab_count.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32,
-                                  ctypes.c_int, ctypes.c_int, ctypes.c_uint32,
-                                  ctypes.POINTER(ctypes.c_uint32)]
-    api.lc_vocab_count.restype = ctypes.c_int
-    api.lc_vocab_close.argtypes = [ctypes.c_void_p]
-    api.lc_vocab_close.restype = None
-    return api
+# Private wire codes are deliberately finite; never forward native diagnostics.
+BOOT_ERRORS = {
+    100: "vocabulary_asset_identity_invalid",
+    101: "vocabulary_asset_symlink",
+    102: "vocabulary_asset_not_regular",
+    103: "vocabulary_asset_digest_mismatch",
+    104: "vocabulary_asset_revision_changed",
+    105: "vocabulary_source_identity_mismatch",
+    106: "vocabulary_compiler_unavailable_or_failed",
+    107: "vocabulary_architecture_invalid",
+    108: "vocabulary_architecture_unsupported",
+    109: "vocabulary_architecture_mismatch",
+    110: "vocabulary_worker_failed",
+}
 
 
 def _worker():
-    # Keep a dedicated protocol descriptor. Native stdout/stderr are discarded.
-    output = os.fdopen(os.dup(1), "w", buffering=1)
-    with open(os.devnull, "wb") as sink:
-        os.dup2(sink.fileno(), 1)
-        os.dup2(sink.fileno(), 2)
-    handle = ctypes.c_void_p()
-    api = None
+    """Hash/compile inside the owned group, then replace Python with native C.
+
+    The interpreter never loads a native library. Even ARM Python can exec a
+    reviewed x86_64 worker via the operating system's translation facility.
+    """
     try:
-        config = json.loads(sys.stdin.buffer.readline(65537))
-        assets = [_VerifiedFile(Asset(**item)) for item in config["assets"]]
-        if not 2 <= len(assets) <= 34:
+        line = sys.stdin.buffer.readline(MAX_WIRE + 1)
+        if len(line) > MAX_WIRE or not line.endswith(b"\n"):
             raise VocabularyRuntimeError("vocabulary_asset_identity_invalid")
-        directory = Path(config["directory"])
-        api = _api(_build(directory))
+        config = json.loads(line)
+        if not 2 <= len(config["assets"]) <= 34:
+            raise VocabularyRuntimeError("vocabulary_asset_identity_invalid")
+        assets = [_VerifiedFile(Asset(**item)) for item in config["assets"]]
+        cpu, flags = compiler_target(assets[0].path)
+        binary = _build(Path(config["directory"]), flags, cpu)
         for asset in assets:
             asset.check()
-        status = api.lc_vocab_open(assets[0].path.encode(), assets[1].path.encode(), ctypes.byref(handle))
-        if status:
-            raise VocabularyRuntimeError("vocabulary_native_open_failed")
-        for asset in assets:
-            asset.check()
-        output.write('{"ready":true}\n')
-        while line := sys.stdin.buffer.readline(MAX_WIRE + 1):
-            if len(line) > MAX_WIRE:
-                raise VocabularyRuntimeError("vocabulary_input_limit")
-            request = json.loads(line)
-            if request == {"close": True}:
-                break
-            data = base64.b64decode(request["data"], validate=True)
-            add, parse, capacity = request["add"], request["parse"], request["capacity"]
-            if (len(data) > MAX_BYTES or type(add) is not bool or type(parse) is not bool
-                    or type(capacity) is not int or not 0 <= capacity <= MAX_TOKENS):
-                raise VocabularyRuntimeError("vocabulary_input_limit")
-            for asset in assets:
-                asset.check()
-            count = ctypes.c_uint32()
-            status = api.lc_vocab_count(handle, data, len(data), add, parse, capacity, ctypes.byref(count))
-            for asset in assets:
-                asset.check()
-            if status:
-                raise VocabularyRuntimeError("vocabulary_native_count_failed")
-            output.write(json.dumps({"count": count.value}) + "\n")
-    except VocabularyRuntimeError as error:
-        output.write(json.dumps({"error": str(error)}) + "\n")
+        os.execve(str(binary), [str(binary), assets[0].path, assets[1].path], _environment())
+    except (VocabularyRuntimeError, ArchitectureError) as error:
+        code = next((code for code, name in BOOT_ERRORS.items() if name == str(error)), 110)
     except Exception:
-        output.write('{"error":"vocabulary_worker_failed"}\n')
-    finally:
-        if api is not None:
-            api.lc_vocab_close(handle)
-        output.close()
+        code = 110
+    sys.stdout.buffer.write(RESPONSE.pack(b"LCR1", code, 0))
+    sys.stdout.buffer.flush()
 
 
 class VocabularyRuntime:
@@ -208,6 +205,8 @@ class VocabularyRuntime:
         self._spawn_task = None
         self._stop_task = None
         self._watchdog = None
+        self._revisions = None
+        self.cpu = None
 
     async def __aenter__(self):
         if self._closed or self._spawn_task is not None:
@@ -226,10 +225,18 @@ class VocabularyRuntime:
                     stderr=asyncio.subprocess.DEVNULL, env=_environment(),
                     start_new_session=True, limit=4096))
                 self._process = await asyncio.shield(self._spawn_task)
-                result = await self._exchange({"assets": [a.__dict__ for a in self._assets],
-                                               "directory": directory})
-                if result != {"ready": True}:
+                self._revisions = tuple(_revision(a.path) for a in self._assets)
+                config = json.dumps({"assets": [a.__dict__ for a in self._assets],
+                                     "directory": directory}, separators=(",", ":")).encode() + b"\n"
+                if len(config) > MAX_WIRE:
+                    raise VocabularyRuntimeError("vocabulary_asset_identity_invalid")
+                self._process.stdin.write(config)
+                await self._process.stdin.drain()
+                cpu = await self._response(startup=True)
+                if cpu not in (1, 2):
                     raise VocabularyRuntimeError("vocabulary_worker_protocol_failed")
+                self.cpu = {1: "x86_64", 2: "arm64"}[cpu]
+                self._check_assets()
             self._watchdog = asyncio.create_task(self._expire())
             return self
         except BaseException:
@@ -240,21 +247,26 @@ class VocabularyRuntime:
         await asyncio.sleep(max(0, self._deadline - asyncio.get_running_loop().time()))
         await self._stop(force=True)
 
-    async def _exchange(self, value):
-        self._process.stdin.write(json.dumps(value, separators=(",", ":")).encode() + b"\n")
-        await self._process.stdin.drain()
-        line = await self._process.stdout.readline()
+    def _check_assets(self):
+        if tuple(_revision(a.path) for a in self._assets) != self._revisions:
+            raise VocabularyRuntimeError("vocabulary_asset_revision_changed")
+
+    async def _response(self, *, startup=False):
         try:
-            result = json.loads(line)
-        except (ValueError, TypeError):
+            data = await self._process.stdout.readexactly(RESPONSE.size)
+            magic, status, count = RESPONSE.unpack(data)
+        except (asyncio.IncompleteReadError, ValueError):
             raise VocabularyRuntimeError("vocabulary_worker_protocol_failed") from None
-        if isinstance(result, dict) and "error" in result:
-            # Worker emits fixed categories only; constrain even those at boundary.
-            error = result["error"]
-            if not isinstance(error, str) or not re.fullmatch(r"vocabulary_[a-z_]{1,80}", error):
-                error = "vocabulary_worker_failed"
-            raise VocabularyRuntimeError(error)
-        return result
+        if magic != b"LCR1" or (status and count):
+            raise VocabularyRuntimeError("vocabulary_worker_protocol_failed")
+        if status:
+            if startup and status in BOOT_ERRORS:
+                raise VocabularyRuntimeError(BOOT_ERRORS[status])
+            if 1 <= status <= 8:
+                raise VocabularyRuntimeError("vocabulary_native_open_failed" if startup
+                                             else "vocabulary_native_count_failed")
+            raise VocabularyRuntimeError("vocabulary_worker_protocol_failed")
+        return count
 
     async def count(self, data: bytes, *, add_special: bool, parse_special: bool,
                     capacity: int = MAX_TOKENS) -> int:
@@ -267,13 +279,16 @@ class VocabularyRuntime:
                 async with self._lock:
                     if self._closed or self._process is None:
                         raise VocabularyRuntimeError("vocabulary_runtime_closed_or_not_started")
-                    result = await self._exchange({"data": base64.b64encode(data).decode("ascii"),
-                                                   "add": add_special, "parse": parse_special,
-                                                   "capacity": capacity})
-                    if (not isinstance(result, dict) or set(result) != {"count"}
-                            or type(result["count"]) is not int or not 0 <= result["count"] <= capacity):
+                    self._check_assets()
+                    self._process.stdin.write(REQUEST.pack(
+                        b"LCQ1", 1, len(data), capacity, int(add_special) | (int(parse_special) << 1)))
+                    self._process.stdin.write(data)
+                    await self._process.stdin.drain()
+                    count = await self._response()
+                    self._check_assets()
+                    if count > capacity:
                         raise VocabularyRuntimeError("vocabulary_worker_protocol_failed")
-                    return result["count"]
+                    return count
         except BaseException:
             await self._stop(force=True)
             raise
@@ -302,9 +317,10 @@ class VocabularyRuntime:
                 if process is not None:
                     if not force and process.returncode is None:
                         try:
-                            process.stdin.write(b'{"close":true}\n')
-                            await process.stdin.drain()
-                            await asyncio.wait_for(process.wait(), timeout=1)
+                            async with asyncio.timeout(1):
+                                process.stdin.write(REQUEST.pack(b"LCQ1", 0, 0, 0, 0))
+                                await process.stdin.drain()
+                                await process.wait()
                         except (OSError, TimeoutError):
                             pass
                     # Kill the owned process group, including any compiler child.

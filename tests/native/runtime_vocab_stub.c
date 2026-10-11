@@ -9,6 +9,11 @@ struct llama_vocab { int present; };
 static struct llama_model model;
 static struct llama_vocab vocab;
 static char audit[8192];
+static ggml_log_callback logger;
+void llama_log_set(ggml_log_callback callback, void * data) {
+    (void)data;
+    logger = callback;
+}
 static void mark(const char * value) {
     FILE * file = fopen(audit, "a");
     assert(file);
@@ -21,6 +26,10 @@ struct llama_model_params llama_model_default_params(void) {
     return params;
 }
 struct llama_model * llama_model_load_from_file(const char * path, struct llama_model_params params) {
+    assert(logger);
+    logger(GGML_LOG_LEVEL_ERROR, "private native callback content", NULL);
+    fputs("private native stdout content", stdout);
+    fputs("private native stderr content", stderr);
     assert(params.vocab_only && params.n_gpu_layers == 0 && params.main_gpu == 17);
     snprintf(audit, sizeof(audit), "%s.audit", path);
     mark("open\n");

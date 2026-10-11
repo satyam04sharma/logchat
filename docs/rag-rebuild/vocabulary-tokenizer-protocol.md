@@ -1,7 +1,7 @@
 # Vocabulary-only tokenizer implementation checkpoint
 
 This is a native bridge foundation, not the default production counter yet.
-`LocalModels` still needs a verified runtime owner and automatic lazy binding.
+`LocalModels` still needs reviewed provider asset discovery and automatic lazy binding.
 No actual GGUF load, native tokenizer parity, context fit, deadline performance,
 embedding refinement, installed-client or 100K acceptance is established here.
 
@@ -91,49 +91,73 @@ counts explicitly labeled until actual parity. Nomic parity, effective context,
 lossless embedding refinement and all integration/acceptance gates remain
 separate work. No real model/tokenizer execution belongs in these offline tests.
 
-## Asynchronous runtime owner checkpoint
+## Architecture-aware asynchronous owner
 
-`pipeline.native_tokenizer.runtime.VocabularyRuntime` now owns the bridge in one
-isolated Python subprocess per explicit async context. Its absolute monotonic
-deadline is at most 300 seconds and includes startup, file hashing, compilation,
-load, lock waiting and counts. Idle expiry, cancellation and native stalls kill
-and reap the owned process group (including a compiler child); orderly close
-calls the C free operation. Cancellation is not implemented with an abandoned
-thread. Repeated close is idempotent. A terminated owner cannot be reused.
+`pipeline.native_tokenizer.runtime.VocabularyRuntime` owns one source-compiled C
+executable per explicit async context. An isolated Python bootstrap hashes the
+supplied assets, selects the library CPU from bounded Mach-O (thin/fat) or ELF64
+metadata, verifies/copies source bytes, compiles, checks the executable CPU, then
+replaces itself with the worker using `execve`. No Python process uses ctypes or
+loads the bridge/library. Apple cc receives an explicit `-arch x86_64` or
+`-arch arm64`, independently of the Python interpreter architecture. Linux only
+admits the host CPU; Windows and unrecognized formats/targets fail closed.
+CPU inspection does not establish ABI or backend approval. OS execution support
+(e.g. Intel translation on ARM macOS) is also required; failed startup is closed.
 
-The owner copies hash-verified pinned headers, license, manifest and bridge into
-a private temporary directory, invokes the fixed system C compiler without a
-shell, and deletes the build at close. There is no shared executable cache.
-The isolated child receives a minimal environment without loader injection,
-compiler flags, Python path, credentials or user-site configuration. Native
-stdout/stderr are discarded; IPC returns only bounded counts or fixed errors.
-No compilation or native loading occurs on import. The runtime Python source is
-included through normal package discovery; all C inputs retain their exact bytes.
+The absolute monotonic deadline is at most 300 seconds and includes hashing,
+compilation, load, lock waiting and counts. Idle expiry, cancellation and native
+stalls kill/reap the owned process group, including compiler descendants. Late
+spawn and stalled-close paths retain bounded cleanup. Normal close frees the
+vocabulary and library deterministically. The private build directory is removed;
+there is no shared writable binary cache and no abandoned native thread.
 
-The internal `Asset` inputs carry expected SHA-256 identities for the library,
-model and an explicitly supplied dependency closure. Files must be regular,
-absolute and free of symlink components. The worker hashes them before loading
-and checks inode/size/mtime/ctime revisions before and after load and every count.
-It serializes native access and passes explicit special-token flags and capacity.
-The primitive can count exact complete prefixed embedding strings with either
-flag pair, but has no embedding-context or Nomic identity admission authority.
+Only the fixed system compiler is invoked, with a minimal environment excluding
+loader injection, flags, credentials, Python paths and user-site settings. The
+worker duplicates the private response descriptor, redirects stdout/stderr to
+`/dev/null` before dlopen, and installs a typed `llama_log_set` quiet callback
+before model open. That process owns the callback exclusively. No native string,
+token ID, prompt, path or diagnostic is returned on the protocol descriptor.
+All C inputs and the architecture selector have checked source hashes and ship
+in wheel/sdist; no native executable ships and import has no native side effects.
 
-**This is still not a production capability or a default adapter.** A caller must
-not derive approved identities by hashing arbitrary discovered files. The next
-provider binding must establish reviewed same-host assets and dependency closure,
-trusted store resolution and protection against path substitution during native
-open (these revision checks detect changes but do not eliminate that race), exact
-manifest/config/template/request identities, pinned server BOS semantics and
-lazy `LocalModels` ownership. Missing-file diagnostics are currently internal
-fixed errors; the binding must translate them into actionable compatibility
-errors. Linux has a build branch only; no additional platform coverage or real
-library compatibility is claimed. No default constructor or saved actual parity
-has been tested by this checkpoint.
+The bootstrap alone receives a bounded JSON asset configuration (65,536 bytes).
+After exec, IPC is fixed binary framing, network byte order:
 
-The new `tests/test_vocab_runtime.py` uses only an inert compiled C fixture,
-whose synthetic count encodes byte length and explicit flags. It proves process
-reuse, deterministic normal free, cancellation during process creation and native
-work, idle/in-flight deadlines, revision/digest/source rejection, bounded input,
-worker death and private-build cleanup. These values are not real token counts,
-GGUF validation, fit or performance evidence. Original generation/embedding
-requests, recipes and saved 400-record replay remain unchanged.
+- Request: `LCQ1`, uint32 operation, byte length, token capacity, flags (20 bytes).
+  Operation 1 counts exactly the following length bytes, including embedded NUL.
+  Flags bit 0 = add-special, bit 1 = parse-special; other bits are rejected.
+  Both byte length and token capacity are bounded at 1,048,576.
+- Operation 0 closes; all other fields must be zero. Unknown operations, malformed
+  headers, oversized values and partial frames fail closed and release resources.
+- Response: `LCR1`, uint32 status, uint32 count (12 bytes). A nonzero status must
+  have zero count. Native statuses are only the bridge's fixed 1–8 categories;
+  bootstrap errors use a finite 100–110 mapping. Ready has status 0 and CPU code
+  1 (x86_64) or 2 (arm64) in the count slot. Subsequent success contains only count.
+
+`Asset` inputs carry expected SHA-256 identities for the library/model/supplied
+closure. The bootstrap hashes each file once. The owner snapshots regular-file,
+symlink-free inode/size/mtime/ctime revisions before startup and checks after load
+and before/after every measurement. Reuse does not rehash a multi-GB model per
+candidate. A changed asset closes the owner; no proof is returned. These checks
+detect substitution but do not eliminate a native-open race. They are primitives,
+not discovery/loader trust policy or proof that a supplied closure is complete.
+
+**The default production binding is still absent.** The next provider adapter
+must enforce reviewed same-host provider/backend/dependency resolution, trusted
+manifest/GGUF/template assets, full request/render/BOS identities and request-only
+memoization within the planner deadline, then own lazy `LocalModels` integration.
+Do not approve unknown assets by fresh self-hashing or claim actual parity from
+stub tests. Missing assets need actionable compatibility errors at that boundary.
+Nomic frontend `(false,true)` and physical `(true,true)` byte counting are available
+through the same worker primitive, but Nomic metadata/digest/context admission
+and generation binding remain separate unfinished work.
+
+Offline tests compile the actual worker and bridge against an inert library,
+including an explicit x86_64 library/worker from the current host Python. They
+exercise framing, binary lengths/flags/limits, private diagnostic suppression,
+source/asset/revision rejection, native stalls, cancellation, deadlines, late
+spawn, deterministic normal free and process/build cleanup. Synthetic counts
+encode byte length and flags; they are not real tokenizer or performance proof.
+Saved actual 7,502-token Mistral/ten Nomic parity remains a root-only gate after
+default integration and independent review. Existing planner, request budgets,
+embedding bytes, 400-record replay and downstream acceptance gates are unchanged.
