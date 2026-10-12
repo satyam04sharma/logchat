@@ -73,9 +73,9 @@ def setup(measure=lambda text: 2048):
     return provider, models, counter
 
 
-async def plan(original, provider, models):
+async def plan(original, provider, models, seconds=10):
     return await plan_embedding_subdivision(original, provider, models,
-                                            deadline=asyncio.get_running_loop().time() + 10)
+                                            deadline=asyncio.get_running_loop().time() + seconds)
 
 
 @pytest.mark.asyncio
@@ -274,8 +274,10 @@ async def test_actual_500_chunk_cap_rejects_whole_plan():
         n = json.loads(text.removeprefix('search_document: '))['whole_section_facts']['exact_metrics']['event_count']
         return 2049 if n > 1 else 2048
     provider, models, counter = setup(measure)
+    # CPU-heavy 504-record plan: slower CI runners need more than the 10 s
+    # default to reach the batch-limit rejection this test asserts.
     with pytest.raises(ValueError, match='subdivision_batch_limit'):
-        await plan(original, provider, models)
+        await plan(original, provider, models, seconds=120)
     assert counter.closed
     assert counter.verified == 0
 
