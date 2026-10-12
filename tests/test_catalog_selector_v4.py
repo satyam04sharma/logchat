@@ -176,16 +176,30 @@ async def test_v4_durable_chunks_match_and_historical_notes_read():
         assert embedding_text(historical) == embedding_text(chunk)
 
 
-def test_presentation_order_is_a_rare_first_permutation():
+def test_presentation_order_is_a_rare_template_first_permutation():
     from logchat.rag.sections import _presentation_order
+    views = {'e0': 'Directory index forbidden by rule', 'e1': 'Directory index forbidden by rule',
+             'e2': 'Directory index forbidden by rule', 'e3': 'payment gateway connection timed out\nStructured'}
     common = ['e0', 'e1', 'e2']
     bound = [{'phrase_ref': 'p0', 'text': 'Directory', 'event_refs': common},
              {'phrase_ref': 'p1', 'text': 'Directory index forbidden', 'event_refs': common},
              {'phrase_ref': 'p2', 'text': 'timed out', 'event_refs': ['e3']},
              {'phrase_ref': 'p3', 'text': 'out\nStructured', 'event_refs': ['e3']},
              {'phrase_ref': 'p4', 'text': 'payment gateway connection timed out', 'event_refs': ['e3']},
-             {'phrase_ref': 'p5', 'text': 'client value', 'event_refs': common}]
-    ordered = [p['phrase_ref'] for p in _presentation_order(bound)]
-    # Rare group lead, then common leads; contained or multi-line fragments last.
+             {'phrase_ref': 'p5', 'text': 'by rule', 'event_refs': common}]
+    ordered = [p['phrase_ref'] for p in _presentation_order(bound, views)]
+    # Rare template lead, then common leads; contained or multi-line fragments last.
     assert ordered == ['p4', 'p1', 'p5', 'p0', 'p2', 'p3']
-    assert _presentation_order([]) == []
+    assert _presentation_order([], {}) == []
+
+
+def test_records_differing_only_by_ids_share_a_template_and_lead_with_shared_operation():
+    from logchat.rag.sections import _presentation_order
+    views = {f'e{i}': f'Session renewal refused for request PROD-{i}; LIB_AUTH_PROD_409' for i in range(4)}
+    bound = [{'phrase_ref': f'p{i}', 'text': f'refused for request PROD-{i}; LIB_AUTH_PROD_409',
+              'event_refs': [f'e{i}']} for i in range(4)]
+    bound.append({'phrase_ref': 'p9', 'text': 'Session renewal refused for request PROD',
+                  'event_refs': list(views)})
+    ordered = [p['text'] for p in _presentation_order(bound, views)]
+    assert ordered[0] == 'Session renewal refused for request PROD'
+    assert sorted(ordered) == sorted(p['text'] for p in bound)

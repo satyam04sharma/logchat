@@ -1164,7 +1164,7 @@ def _expanded_compact_request(chunk, records, config, messages=None, *, source_c
             bound = source_catalog.bind(metadata, views, bodies)
         except (ValueError, TypeError, KeyError):
             raise SectionModelError("compact_catalog_invalid_binding", "compact_summary") from None
-        presented = _presentation_order(bound)
+        presented = _presentation_order(bound, views)
         # Membership/facts remain caller-derived. The complete original model
         # records and field catalog above remain unchanged; no raw sidecar is sent.
         payload.update(selector_protocol=SELECTOR_PROTOCOL,
@@ -1196,21 +1196,32 @@ def _expanded_compact_request(chunk, records, config, messages=None, *, source_c
     return payload, schema, metadata, catalogs
 
 
-def _presentation_order(bound):
+def _presentation_order(bound, views):
     """Order every bound choice for review without adding, dropping or changing any.
 
-    Membership groups appear rarest first, so a rare record is not hidden behind
-    repeated templates. Within a group, complete single-line phrases come first;
-    a phrase contained in an earlier lead of its group follows the leads. Leads
-    are interleaved across groups so each distinct message is visible early.
+    Records are grouped by message template (tokens containing digits masked), so
+    records differing only by an ID are one pattern. Templates appear rarest first,
+    so a rare record is not hidden behind repeated ones. Within a template, the
+    longest single-line phrase covering the most of its records leads; a phrase
+    contained in an earlier lead follows the leads. Leads are interleaved across
+    templates so each distinct message pattern is visible early.
     """
-    groups = {}
+    def template(text):
+        return re.sub(r"\S*\d\S*", "#", text)
+    members = {}
+    for ref, view in views.items():
+        members.setdefault(template(view), []).append(ref)
+    owner = {ref: key for key, refs in members.items() for ref in refs}
+    groups = {key: [] for key in members}
+    rest = []
     for index, phrase in enumerate(bound):
-        groups.setdefault(tuple(phrase["event_refs"]), []).append((index, phrase))
-    leads, rest = [], []
-    for members, items in sorted(groups.items(), key=lambda item: (len(item[0]), item[1][0][0])):
-        items.sort(key=lambda item: ("\n" in item[1]["text"], -len(item[1]["text"].split()),
-                                     -len(item[1]["text"]), item[0]))
+        keys = {owner[ref] for ref in phrase["event_refs"]}
+        (groups[keys.pop()] if len(keys) == 1 else rest).append((index, phrase))
+    order = sorted(members, key=lambda key: (len(members[key]), views and list(views).index(members[key][0])))
+    leads = []
+    for key in order:
+        items = sorted(groups[key], key=lambda item: ("\n" in item[1]["text"], -len(item[1]["event_refs"]),
+                                                      -len(item[1]["text"].split()), -len(item[1]["text"]), item[0]))
         chosen = []
         for item in items:
             text = item[1]["text"]
@@ -1222,7 +1233,6 @@ def _presentation_order(bound):
     if sorted(map(id, result)) != sorted(map(id, bound)):
         raise ValueError("source_catalog_presentation_mismatch")
     return result
-
 
 def _compact_request(chunk, records, config, messages=None, **catalog_options):
     """Build and prove the complete model input before any packing or counting."""
