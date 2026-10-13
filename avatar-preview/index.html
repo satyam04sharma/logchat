@@ -61,6 +61,13 @@ nav .wrap{display:flex;align-items:center;gap:24px;height:66px}
 .pull code{font-size:15px;white-space:nowrap;overflow-x:auto;min-width:0;flex:1;scrollbar-width:none}
 .pull code .p{color:#7ED9B5}
 .hero .wrap>div{min-width:0}
+footer .legal{font-size:12px;opacity:.6}footer .legal a{color:inherit}
+@keyframes mascotFloat{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-6px) rotate(-3deg)}}
+@keyframes mascotHop{0%{transform:translateY(0) scale(1)}30%{transform:translateY(-14px) scale(1.08) rotate(6deg)}60%{transform:translateY(0) scale(.96) rotate(-4deg)}100%{transform:translateY(0) scale(1)}}
+#reactiveMascot{display:inline-block;transform-origin:50% 80%;animation:mascotFloat 3.2s ease-in-out infinite}
+#reactiveMascot.hop{animation:mascotHop .7s ease-out 1}
+.motion-paused #reactiveMascot{animation-play-state:paused}
+@media (prefers-reduced-motion: reduce){#reactiveMascot,#reactiveMascot.hop{animation:none}}
 .copy{flex:none;border:0;cursor:pointer;background:#342D4A;color:#fff;font:800 14px var(--body);padding:10px 14px;border-radius:12px}
 .copy.done{background:#1F9E74}
 .herocta{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;align-items:center}
@@ -274,4 +281,21 @@ footer .wrap{display:flex;gap:16px;flex-wrap:wrap;align-items:center;justify-con
     </div>
     </div>
   </div>
-</header><footer><div class="wrap"><p>Logchat · memory for your agents · <a href="https://github.com/satyam04sharma/logchat">GitHub</a></p><a href="assets/avatar-lab/NOTICE.md">Credits</a></div></footer><script type="module" src="assets/avatar-lab/landing.js"></script></html>
+</header><footer><div class="wrap"><p>Logchat · memory for your agents · <a href="https://github.com/satyam04sharma/logchat">GitHub</a></p><small class="legal">Mascot animation: <a href="assets/avatar-lab/NOTICE.md">AGPL-3.0 · source</a></small></div></footer><script type="module" src="assets/avatar-lab/landing.js"></script><script>
+(() => {
+  const mascot = document.getElementById('reactiveMascot');
+  const copy = document.querySelector('[data-copy="pull"]');
+  if (!mascot || !copy) return;
+  const hop = () => {
+    mascot.classList.remove('hop');
+    void mascot.offsetWidth;
+    mascot.classList.add('hop');
+  };
+  mascot.addEventListener('animationend', (event) => {
+    if (event.animationName === 'mascotHop') mascot.classList.remove('hop');
+  });
+  copy.addEventListener('pointerenter', hop);
+  copy.addEventListener('click', hop);
+  mascot.addEventListener('pointerenter', hop);
+})();
+</script></html>
