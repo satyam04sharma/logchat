@@ -41,9 +41,9 @@ copy.addEventListener('click', async () => {
   if (copyPending) return;
   copyPending = true;
   try {
-    await navigator.clipboard.writeText('python -m pip install .');
+    await navigator.clipboard.writeText('git clone https://github.com/satyam04sharma/logchat.git && cd logchat && python -m pip install .');
     copy.textContent = 'Copied';
-    react('celebrate', 'Command copied. Run it from the cloned repository.');
+    react('celebrate', 'Command copied. Paste it into your terminal.');
   } catch {
     copy.textContent = 'Select command';
     const selection = getSelection();

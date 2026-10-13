@@ -60,6 +60,7 @@ nav .wrap{display:flex;align-items:center;gap:24px;height:66px}
 .pull{margin-top:30px;display:flex;align-items:center;gap:10px;background:var(--term);color:var(--termInk);border-radius:18px;padding:8px 8px 8px 20px;max-width:100%;box-shadow:var(--shadow)}
 .pull code{font-size:15px;white-space:nowrap;overflow-x:auto;min-width:0;flex:1;scrollbar-width:none}
 .pull code .p{color:#7ED9B5}
+.hero .wrap>div{min-width:0}
 .copy{flex:none;border:0;cursor:pointer;background:#342D4A;color:#fff;font:800 14px var(--body);padding:10px 14px;border-radius:12px}
 .copy.done{background:#1F9E74}
 .herocta{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;align-items:center}
@@ -224,13 +225,14 @@ footer .wrap{display:flex;gap:16px;flex-wrap:wrap;align-items:center;justify-con
       <h1 style="margin-top:18px">Log memory <span class="hl">for your agents.</span></h1>
       <p class="lede">Connect your app’s command or log file. Logchat uses your selected local models to build compact, searchable memory and return supporting context to your coding agent.</p>
       <div class="pull" role="group" aria-label="Installation command">
-        <code id="pullCmd"><span class="p">$</span> python -m pip install .</code>
+        <code id="pullCmd"><span class="p">$</span> git clone https://github.com/satyam04sharma/logchat.git &amp;&amp; cd logchat &amp;&amp; python -m pip install .</code>
         <button class="copy" type="button" data-copy="pull">Copy</button>
       </div>
       <div class="herocta">
         <a class="btn btn-soft" href="https://github.com/satyam04sharma/logchat#copy-this-to-your-agent">Set up with your agent</a>
-        <span class="pre">MIT application · local release candidate</span>
+        <a class="btn btn-soft" href="https://github.com/satyam04sharma/logchat">View on GitHub</a>
       </div>
+      <p class="pre" style="margin-top:14px">Requires Python 3.12+, macOS and Ollama with your own local models. MIT licensed · release candidate · <a href="https://github.com/satyam04sharma/logchat#get-started">full setup guide</a></p>
     </div>
 
     <div><div class="memory-flow" aria-label="Illustration: logs are summarized, embedded, and retrieved as context">
@@ -272,4 +274,4 @@ footer .wrap{display:flex;gap:16px;flex-wrap:wrap;align-items:center;justify-con
     </div>
     </div>
   </div>
-</header><footer><div class="wrap"><p>Logchat · memory for your agents</p><a href="assets/avatar-lab/NOTICE.md">Credits</a></div></footer><script type="module" src="assets/avatar-lab/landing.js"></script></html>
+</header><footer><div class="wrap"><p>Logchat · memory for your agents · <a href="https://github.com/satyam04sharma/logchat">GitHub</a></p><a href="assets/avatar-lab/NOTICE.md">Credits</a></div></footer><script type="module" src="assets/avatar-lab/landing.js"></script></html>
